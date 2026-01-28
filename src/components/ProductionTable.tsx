@@ -99,22 +99,22 @@ export function ProductionTable({ rows, isLoading }: ProductionTableProps) {
 
   return (
     <ScrollArea className="h-[calc(100vh-280px)]">
-      <Table className="text-xs">
+      <Table className="text-xs table-fixed w-full">
         <TableHeader className="sticky top-0 bg-gray-100 z-10">
           <TableRow className="border-b-2">
-            <TableHead className="w-20 font-bold bg-gray-200">OPS #</TableHead>
-            <TableHead className="w-14 font-bold bg-gray-200">Buyer</TableHead>
-            <TableHead className="w-28 font-bold bg-gray-200">Article</TableHead>
-            <TableHead className="w-16 font-bold bg-gray-200">Size</TableHead>
-            <TableHead className="w-14 font-bold text-right bg-gray-200">Pcs</TableHead>
-            <TableHead className="w-40 font-bold bg-yellow-100">Status</TableHead>
-            <TableHead className="w-14 font-bold text-right bg-green-100">Rcvd</TableHead>
-            <TableHead className="w-14 font-bold text-right bg-orange-100">To Rcvd</TableHead>
-            <TableHead className="w-14 font-bold text-right bg-purple-100">Finish</TableHead>
-            <TableHead className="w-16 font-bold bg-gray-200">Ex-Fact</TableHead>
-            <TableHead className="w-20 font-bold bg-gray-200">Color</TableHead>
-            <TableHead className="w-20 font-bold bg-gray-200">Quality</TableHead>
-            <TableHead className="w-14 font-bold text-center bg-gray-200">Co.</TableHead>
+            <TableHead className="w-16 font-bold bg-gray-200 text-xs">OPS #</TableHead>
+            <TableHead className="w-12 font-bold bg-gray-200 text-xs">Buyer</TableHead>
+            <TableHead className="w-24 font-bold bg-gray-200 text-xs">Article</TableHead>
+            <TableHead className="w-16 font-bold bg-gray-200 text-xs">Size</TableHead>
+            <TableHead className="w-12 font-bold text-right bg-gray-200 text-xs">Pcs</TableHead>
+            <TableHead className="w-28 font-bold bg-yellow-100 text-xs">Status</TableHead>
+            <TableHead className="w-12 font-bold text-right bg-green-100 text-xs">Rcvd</TableHead>
+            <TableHead className="w-14 font-bold text-right bg-orange-100 text-xs">To Rcvd</TableHead>
+            <TableHead className="w-12 font-bold text-right bg-purple-100 text-xs">Finish</TableHead>
+            <TableHead className="w-14 font-bold bg-gray-200 text-xs">Ex-Fact</TableHead>
+            <TableHead className="w-16 font-bold bg-gray-200 text-xs">Color</TableHead>
+            <TableHead className="w-16 font-bold bg-gray-200 text-xs">Quality</TableHead>
+            <TableHead className="w-12 font-bold text-center bg-gray-200 text-xs">Co.</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -152,19 +152,19 @@ export function ProductionTable({ rows, isLoading }: ProductionTableProps) {
                 <TableCell className="text-right font-medium">{row.orderPcs}</TableCell>
 
                 {/* Status - Editable */}
-                <TableCell className="bg-yellow-50">
+                <TableCell className="bg-yellow-50 overflow-hidden">
                   {editingCell === `${rowKey}-status` ? (
                     <Input
                       value={editValue}
                       onChange={(e) => setEditValue(e.target.value)}
                       onBlur={() => saveEdit(row.orderId, row.itemId, 'status', editValue)}
                       onKeyDown={(e) => handleKeyDown(e, row.orderId, row.itemId, 'status')}
-                      className="h-6 text-xs"
+                      className="h-6 text-xs w-full"
                       autoFocus
                     />
                   ) : (
                     <div
-                      className="cursor-pointer hover:bg-yellow-100 px-1 py-0.5 rounded min-h-[20px] truncate"
+                      className="cursor-pointer hover:bg-yellow-100 px-1 py-0.5 rounded min-h-[20px] truncate text-xs"
                       onClick={() => startEdit(rowKey, 'status', row.status)}
                       title={row.status || 'Click to add status'}
                     >
