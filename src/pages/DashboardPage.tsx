@@ -397,8 +397,12 @@ export function DashboardPage() {
         <StatsCards stats={stats} isLoading={!stats} />
 
         {/* Tabs for different views */}
-        <Tabs defaultValue="orders" className="w-full">
+        <Tabs defaultValue="order-summary" className="w-full">
           <TabsList>
+            <TabsTrigger value="order-summary" className="gap-2">
+              <ListOrdered className="h-4 w-4" />
+              Order Summary
+            </TabsTrigger>
             <TabsTrigger value="orders" className="gap-2">
               <Table className="h-4 w-4" />
               Order Status
@@ -407,10 +411,6 @@ export function DashboardPage() {
                   {filteredRows.length}
                 </Badge>
               )}
-            </TabsTrigger>
-            <TabsTrigger value="order-summary" className="gap-2">
-              <ListOrdered className="h-4 w-4" />
-              Order Summary
             </TabsTrigger>
             <TabsTrigger value="tna" className="gap-2">
               <Calendar className="h-4 w-4" />
