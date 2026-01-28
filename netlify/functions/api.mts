@@ -396,6 +396,134 @@ export default async function handler(req: Request, context: Context): Promise<R
       })
     }
 
+    // PRODUCTION TRACKER: Bulk update from Excel
+    if (path === '/production-tracker/bulk-update' && method === 'POST') {
+      const body = await req.json()
+      const { rows: uploadedRows } = body
+
+      if (!uploadedRows || !Array.isArray(uploadedRows)) {
+        return jsonResponse({ success: false, error: 'Invalid data format' }, 400)
+      }
+
+      const now = new Date().toISOString()
+
+      // Fetch all open orders to build a lookup map
+      const ordersRef = db.collection('orders').doc('data').collection('orders')
+      const ordersSnapshot = await ordersRef.where('status', '==', 'sent').get()
+
+      const orders = ordersSnapshot.docs
+        .map((doc) => ({ id: doc.id, ...doc.data() }))
+        .filter((o: any) => o.orderType !== 'samples')
+
+      // Build lookup: key = "opsNo|article|size|color" -> { orderId, itemId }
+      const itemLookup = new Map<string, { orderId: string; itemId: string; opsNo: string }>()
+
+      orders.forEach((order: any) => {
+        const opsNo = formatOpsNo(order.salesNo)
+        const items = order.items || []
+        items.forEach((item: any) => {
+          const article = (item.emDesignName || item.articleName || '').toLowerCase().trim()
+          const size = (item.size || '').toLowerCase().trim()
+          const color = (item.color || '').toLowerCase().trim()
+
+          // Create multiple lookup keys for flexible matching
+          const key1 = `${opsNo.toLowerCase()}|${article}|${size}|${color}`
+          const key2 = `${opsNo.toLowerCase()}|${article}|${size}` // without color
+          const key3 = `${opsNo.toLowerCase()}|${article}` // without size and color
+
+          itemLookup.set(key1, { orderId: order.id, itemId: item.id, opsNo })
+          if (!itemLookup.has(key2)) {
+            itemLookup.set(key2, { orderId: order.id, itemId: item.id, opsNo })
+          }
+          if (!itemLookup.has(key3)) {
+            itemLookup.set(key3, { orderId: order.id, itemId: item.id, opsNo })
+          }
+        })
+      })
+
+      let matched = 0
+      let updated = 0
+      let notFound = 0
+      const errors: string[] = []
+
+      // Process each uploaded row
+      for (const row of uploadedRows) {
+        const opsNo = (row.opsNo || '').toLowerCase().trim()
+        const article = (row.article || '').toLowerCase().trim()
+        const size = (row.size || '').toLowerCase().trim()
+        const color = (row.color || '').toLowerCase().trim()
+
+        // Try different lookup keys
+        const key1 = `${opsNo}|${article}|${size}|${color}`
+        const key2 = `${opsNo}|${article}|${size}`
+        const key3 = `${opsNo}|${article}`
+
+        const match = itemLookup.get(key1) || itemLookup.get(key2) || itemLookup.get(key3)
+
+        if (!match) {
+          notFound++
+          if (notFound <= 10) {
+            errors.push(`Not found: ${row.opsNo} - ${row.article} (${row.size})`)
+          }
+          continue
+        }
+
+        matched++
+
+        // Update tracker with status fields only
+        const trackerRef = db.collection('production_tracker').doc(match.orderId)
+        const trackerDoc = await trackerRef.get()
+
+        const itemUpdate = {
+          status: row.status || '',
+          rcvdPcs: row.rcvdPcs || 0,
+          oldStock: row.oldStock || 0,
+          bazarDone: row.bazarDone || 0,
+          uFinishing: row.uFinishing || 0,
+          packed: row.packed || 0,
+          updatedAt: now,
+        }
+
+        try {
+          if (trackerDoc.exists) {
+            await trackerRef.update({
+              [`items.${match.itemId}`]: {
+                ...trackerDoc.data()?.items?.[match.itemId],
+                ...itemUpdate,
+              },
+              updatedAt: now,
+            })
+          } else {
+            await trackerRef.set({
+              opsNo: match.opsNo,
+              items: {
+                [match.itemId]: {
+                  id: match.itemId,
+                  orderId: match.orderId,
+                  ...itemUpdate,
+                },
+              },
+              createdAt: now,
+              updatedAt: now,
+            })
+          }
+          updated++
+        } catch (error) {
+          errors.push(`Failed to update: ${row.opsNo} - ${row.article}`)
+        }
+      }
+
+      return jsonResponse({
+        success: true,
+        data: {
+          matched,
+          updated,
+          notFound,
+          errors: errors.slice(0, 10),
+        },
+      })
+    }
+
     // PRODUCTION TRACKER: Update item-level tracking (Excel row)
     if (path.match(/^\/production-tracker\/[^/]+\/item\/[^/]+$/) && method === 'PUT') {
       const parts = path.split('/')
