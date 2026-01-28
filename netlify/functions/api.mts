@@ -694,6 +694,107 @@ export default async function handler(req: Request, context: Context): Promise<R
       return jsonResponse({ success: true })
     }
 
+    // PRODUCTION STATUS FILE: Get current file metadata
+    if (path === '/production-status/file' && method === 'GET') {
+      const docRef = db.collection('settings').doc('production_status_file')
+      const doc = await docRef.get()
+
+      if (!doc.exists) {
+        return jsonResponse({ success: true, data: null })
+      }
+
+      return jsonResponse({ success: true, data: doc.data() })
+    }
+
+    // PRODUCTION STATUS FILE: Save file metadata (marks upload timestamp for new orders tracking)
+    if (path === '/production-status/file' && method === 'POST') {
+      const body = await req.json()
+      const { fileName, uploadedAt, uploadedBy } = body
+
+      const docRef = db.collection('settings').doc('production_status_file')
+      await docRef.set({
+        fileName: fileName || 'Excel Upload',
+        uploadedAt: uploadedAt || new Date().toISOString(),
+        uploadedBy: uploadedBy || 'PPC Team',
+      }, { merge: true })
+
+      return jsonResponse({ success: true })
+    }
+
+    // NEW ORDERS: Get orders created after last Excel upload
+    if (path === '/production-status/new-orders' && method === 'GET') {
+      // Get last upload timestamp
+      const settingsDoc = await db.collection('settings').doc('production_status_file').get()
+      const lastUploadedAt = settingsDoc.exists ? settingsDoc.data()?.uploadedAt : null
+
+      if (!lastUploadedAt) {
+        // No upload yet, show all recent orders (last 7 days)
+        const sevenDaysAgo = new Date()
+        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7)
+
+        const ordersRef = db.collection('orders').doc('data').collection('orders')
+        const ordersSnapshot = await ordersRef
+          .where('status', '==', 'sent')
+          .where('createdAt', '>=', sevenDaysAgo.toISOString())
+          .get()
+
+        const orders = ordersSnapshot.docs
+          .map((doc) => ({ id: doc.id, ...doc.data() }))
+          .filter((o: any) => o.orderType !== 'samples')
+          .map((o: any) => ({
+            id: o.id,
+            opsNo: formatOpsNo(o.salesNo),
+            buyerCode: o.customerCode || o.buyerCode,
+            buyerName: o.buyerName,
+            companyCode: o.companyCode,
+            totalPcs: o.totalPcs || o.items?.reduce((sum: number, i: any) => sum + (i.pcs || 0), 0) || 0,
+            totalSqm: o.totalSqm || o.items?.reduce((sum: number, i: any) => sum + (i.sqm || 0), 0) || 0,
+            createdAt: o.createdAt,
+          }))
+          .sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+
+        return jsonResponse({
+          success: true,
+          data: {
+            orders,
+            lastUploadedAt: null,
+            isFirstUpload: true,
+          },
+        })
+      }
+
+      // Fetch orders created after last upload
+      const ordersRef = db.collection('orders').doc('data').collection('orders')
+      const ordersSnapshot = await ordersRef
+        .where('status', '==', 'sent')
+        .where('createdAt', '>', lastUploadedAt)
+        .get()
+
+      const orders = ordersSnapshot.docs
+        .map((doc) => ({ id: doc.id, ...doc.data() }))
+        .filter((o: any) => o.orderType !== 'samples')
+        .map((o: any) => ({
+          id: o.id,
+          opsNo: formatOpsNo(o.salesNo),
+          buyerCode: o.customerCode || o.buyerCode,
+          buyerName: o.buyerName,
+          companyCode: o.companyCode,
+          totalPcs: o.totalPcs || o.items?.reduce((sum: number, i: any) => sum + (i.pcs || 0), 0) || 0,
+          totalSqm: o.totalSqm || o.items?.reduce((sum: number, i: any) => sum + (i.sqm || 0), 0) || 0,
+          createdAt: o.createdAt,
+        }))
+        .sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+
+      return jsonResponse({
+        success: true,
+        data: {
+          orders,
+          lastUploadedAt,
+          isFirstUpload: false,
+        },
+      })
+    }
+
     // Not found
     return jsonResponse({ success: false, error: 'Not found' }, 404)
 

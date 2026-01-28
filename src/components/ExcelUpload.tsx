@@ -159,9 +159,21 @@ export function ExcelUpload({ open, onOpenChange }: ExcelUploadProps) {
 
       setUploadResult(result.data)
 
+      // Save file metadata to clear new orders alert
+      await fetch('/api/production-status/file', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fileName: file?.name || 'Excel Upload',
+          uploadedAt: new Date().toISOString(),
+          uploadedBy: 'PPC Team',
+        }),
+      })
+
       // Refresh data
       queryClient.invalidateQueries({ queryKey: ['production-rows'] })
       queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] })
+      queryClient.invalidateQueries({ queryKey: ['new-orders'] })
     } catch (error) {
       console.error('Upload error:', error)
       setUploadResult({

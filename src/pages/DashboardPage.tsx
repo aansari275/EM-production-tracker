@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
-import { useProductionRows, useDashboardStats } from '@/hooks/useOrders'
+import { useProductionRows, useDashboardStats, useNewOrders } from '@/hooks/useOrders'
+import { formatDistanceToNow } from 'date-fns'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -33,7 +34,11 @@ import {
   AlertTriangle,
   Clock,
   ListOrdered,
+  AlertCircle,
+  Package,
+  FileSpreadsheet,
 } from 'lucide-react'
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { useQueryClient } from '@tanstack/react-query'
 import type { ProductionRow } from '@/types'
 
@@ -64,6 +69,7 @@ export function DashboardPage() {
 
   const { data: rows = [], isLoading: rowsLoading, isFetching } = useProductionRows(debouncedSearch)
   const { data: stats } = useDashboardStats()
+  const { data: newOrdersData, isLoading: newOrdersLoading } = useNewOrders()
 
   // Debounced search
   useEffect(() => {
@@ -393,6 +399,52 @@ export function DashboardPage() {
 
       {/* Main Content */}
       <main className="p-4 space-y-4">
+        {/* New Orders Alert */}
+        {!newOrdersLoading && newOrdersData && newOrdersData.orders.length > 0 && (
+          <Alert variant="warning" className="border-amber-300 bg-amber-50">
+            <AlertCircle className="h-5 w-5 text-amber-600" />
+            <AlertTitle className="text-amber-800 font-semibold">
+              {newOrdersData.orders.length} New Order{newOrdersData.orders.length > 1 ? 's' : ''} from Merchandising
+            </AlertTitle>
+            <AlertDescription className="text-amber-700">
+              <p className="mb-3 text-sm">
+                {newOrdersData.isFirstUpload
+                  ? 'These orders were created in the last 7 days. Upload an Excel to clear this alert.'
+                  : `Created since last Excel upload (${newOrdersData.lastUploadedAt ? formatDistanceToNow(new Date(newOrdersData.lastUploadedAt), { addSuffix: true }) : 'never'})`}
+              </p>
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {newOrdersData.orders.slice(0, 9).map((order) => (
+                  <div
+                    key={order.id}
+                    className="flex items-center justify-between bg-white/80 rounded-lg px-3 py-2 border border-amber-200"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Badge variant="outline" className="text-xs font-mono bg-white">
+                        {order.opsNo}
+                      </Badge>
+                      <span className="text-sm font-medium">{order.buyerCode}</span>
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-amber-700">
+                      <span>{order.totalPcs} pcs</span>
+                      <span className="text-amber-400">•</span>
+                      <span>{order.totalSqm?.toFixed(1)} sqm</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {newOrdersData.orders.length > 9 && (
+                <p className="mt-2 text-xs text-amber-600">
+                  +{newOrdersData.orders.length - 9} more new orders
+                </p>
+              )}
+              <p className="mt-3 text-xs text-amber-600 flex items-center gap-1">
+                <FileSpreadsheet className="h-3 w-3" />
+                Upload the latest Excel file to clear this alert
+              </p>
+            </AlertDescription>
+          </Alert>
+        )}
+
         {/* Stats Cards - Compact */}
         <StatsCards stats={stats} isLoading={!stats} />
 

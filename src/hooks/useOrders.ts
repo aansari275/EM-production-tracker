@@ -69,6 +69,38 @@ export function useDashboardStats() {
   })
 }
 
+// Interface for new orders data
+export interface NewOrdersData {
+  orders: Array<{
+    id: string
+    opsNo: string
+    buyerCode: string
+    buyerName: string
+    companyCode: 'EMPL' | 'EHI'
+    totalPcs: number
+    totalSqm: number
+    createdAt: string
+  }>
+  lastUploadedAt: string | null
+  isFirstUpload: boolean
+}
+
+// Fetch new orders (created after last Excel upload)
+export function useNewOrders() {
+  return useQuery<NewOrdersData>({
+    queryKey: ['new-orders'],
+    queryFn: async () => {
+      const response = await fetch('/api/production-status/new-orders')
+      if (!response.ok) throw new Error('Failed to fetch new orders')
+
+      const data = await response.json()
+      return data.data
+    },
+    staleTime: 60000, // 1 minute
+    refetchInterval: 5 * 60 * 1000, // Refetch every 5 minutes
+  })
+}
+
 // Helper to determine current stage from tracker
 export function getCurrentStage(tracker: ProductionTrackerEntry | undefined, order: Order): TnaStage {
   if (!tracker?.stages) {
