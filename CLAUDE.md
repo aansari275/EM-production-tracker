@@ -54,6 +54,15 @@ Excel-style production tracker for the Production Planning & Control (PPC) team.
 - This Week's ex-factory
 - EMPL / EHI company breakdown
 
+### 6. New Orders Alert
+- Amber alert at top of dashboard when PPC logs in
+- Shows orders created by merchants since the last Excel upload
+- Displays: OPS #, buyer code, pcs, sqm for each new order
+- Shows up to 9 orders in a grid, with count of remaining
+- Alert clears automatically when Excel is uploaded
+- If no upload has ever been made, shows orders from last 7 days
+- Data stored in: `settings/production_status_file` (uploadedAt timestamp)
+
 ## Data Model
 
 ### Reading from Orders (Read-Only)
@@ -117,6 +126,9 @@ interface ProductionTrackerEntry {
 | `/api/production-tracker/:id/item/:itemId` | PUT | Update item status |
 | `/api/production-tracker/:id/stage/:stage` | PUT | Update TNA stage |
 | `/api/production-tracker/bulk-update` | POST | Bulk update from Excel |
+| `/api/production-status/file` | GET | Get last upload metadata |
+| `/api/production-status/file` | POST | Save upload timestamp (clears new orders alert) |
+| `/api/production-status/new-orders` | GET | Get orders created after last upload |
 
 ## Environment Variables
 ```bash
