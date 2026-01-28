@@ -17,6 +17,20 @@ if (!getApps().length) {
 
 const db = getFirestore()
 
+// Helper to format OPS number (OPS-25881 -> EM-26-881)
+function formatOpsNo(opsNo: string): string {
+  if (!opsNo) return '-'
+  const match = opsNo.match(/OPS-(\d+)/)
+  if (!match) return opsNo
+  const numericPart = match[1]
+  const currentYear = new Date().getFullYear().toString().slice(-2)
+  let sequence = numericPart
+  if (numericPart.length > 4) {
+    sequence = numericPart.slice(2)
+  }
+  return `EM-${currentYear}-${sequence}`
+}
+
 // TNA Stages
 const TNA_STAGES = [
   'raw_material_purchase',
@@ -48,8 +62,55 @@ interface ProductionTrackerEntry {
   opsNo: string
   stages: Record<TnaStage, StageUpdate>
   currentStage: TnaStage
+  items?: Record<string, ProductionItemTracker>
   createdAt: string
   updatedAt: string
+}
+
+interface ProductionItemTracker {
+  id: string
+  orderId: string
+  opsNo: string
+  status: string
+  rcvdPcs: number
+  toRcvdPcs: number
+  oldStock: number
+  bazarDone: number
+  uFinishing: number
+  packed: number
+  vendorName?: string
+  folioNo?: string
+  supplierCompletionDate?: string
+  updatedAt: string
+  updatedBy?: string
+}
+
+interface ProductionRow {
+  orderId: string
+  companyCode: 'EMPL' | 'EHI'
+  customerCode: string
+  merchant: string
+  poDate: string
+  exFactoryDate: string
+  opsNo: string
+  itemId: string
+  article: string
+  size: string
+  color: string
+  quality: string
+  orderPcs: number
+  status: string
+  rcvdPcs: number
+  toRcvdPcs: number
+  oldStock: number
+  bazarDone: number
+  uFinishing: number
+  packed: number
+  vendorName: string
+  folioNo: string
+  supplierCompletionDate: string
+  orderIssueDate: string
+  orderType: string
 }
 
 // Helper to create JSON response
@@ -139,6 +200,122 @@ export default async function handler(req: Request, context: Context): Promise<R
       return jsonResponse({ success: true, data: ordersWithTrackers })
     }
 
+    // PRODUCTION ROWS: Get item-level production data (Excel format)
+    if (path === '/production-rows' && method === 'GET') {
+      const search = url.searchParams.get('search')?.toLowerCase()
+
+      // Fetch orders with status 'sent' (in production)
+      const ordersRef = db.collection('orders').doc('data').collection('orders')
+      const ordersSnapshot = await ordersRef.where('status', '==', 'sent').get()
+
+      let orders = ordersSnapshot.docs
+        .map((doc) => ({ id: doc.id, ...doc.data() }))
+        .filter((o: any) => o.orderType !== 'samples')
+
+      // Fetch merchants for name lookup
+      const merchantsSnapshot = await db.collection('merchants').get()
+      const merchantsMap = new Map<string, { name: string; code: string }>()
+      merchantsSnapshot.docs.forEach((doc) => {
+        const data = doc.data()
+        merchantsMap.set(data.code, { name: data.name, code: data.code })
+      })
+
+      // Fetch production tracker data
+      const trackerIds = orders.map((o: any) => o.id)
+      const trackerMap = new Map<string, any>()
+
+      // Batch fetch trackers (Firestore doesn't support in queries > 30)
+      for (let i = 0; i < trackerIds.length; i += 30) {
+        const batch = trackerIds.slice(i, i + 30)
+        const trackerDocs = await Promise.all(
+          batch.map((id: string) => db.collection('production_tracker').doc(id).get())
+        )
+        trackerDocs.forEach((doc) => {
+          if (doc.exists) {
+            trackerMap.set(doc.id, doc.data())
+          }
+        })
+      }
+
+      // Build flattened rows (one per item)
+      const rows: ProductionRow[] = []
+
+      orders.forEach((order: any) => {
+        const tracker = trackerMap.get(order.id)
+        const merchant = merchantsMap.get(order.merchantCode)
+        const assistant = order.assistantMerchantCode
+          ? merchantsMap.get(order.assistantMerchantCode)
+          : null
+
+        const merchantDisplay = assistant
+          ? `${merchant?.name || order.merchantCode} / ${assistant.name}`
+          : merchant?.name || order.merchantCode
+
+        // Format OPS number (OPS-25881 -> EM-26-881)
+        const opsNo = formatOpsNo(order.salesNo)
+
+        const items = order.items || []
+        items.forEach((item: any) => {
+          const itemTracker = tracker?.items?.[item.id] || {}
+
+          const row: ProductionRow = {
+            orderId: order.id,
+            companyCode: order.companyCode || 'EMPL',
+            customerCode: order.customerCode || '',
+            merchant: merchantDisplay,
+            poDate: order.orderConfirmationDate || '',
+            exFactoryDate: order.shipDate || '',
+            opsNo,
+            itemId: item.id,
+            article: item.emDesignName || item.articleName || '',
+            size: item.size || '',
+            color: item.color || '',
+            quality: item.quality || '',
+            orderPcs: item.pcs || 0,
+            status: itemTracker.status || '',
+            rcvdPcs: itemTracker.rcvdPcs || 0,
+            toRcvdPcs: (item.pcs || 0) - (itemTracker.rcvdPcs || 0),
+            oldStock: itemTracker.oldStock || 0,
+            bazarDone: itemTracker.bazarDone || 0,
+            uFinishing: itemTracker.uFinishing || 0,
+            packed: itemTracker.packed || 0,
+            vendorName: item.contractorName || itemTracker.vendorName || '',
+            folioNo: item.folioNo || itemTracker.folioNo || '',
+            supplierCompletionDate: itemTracker.supplierCompletionDate || '',
+            orderIssueDate: order.orderConfirmationDate || '',
+            orderType: order.orderType || '',
+          }
+
+          rows.push(row)
+        })
+      })
+
+      // Apply search filter
+      let filteredRows = rows
+      if (search) {
+        filteredRows = rows.filter((row) => {
+          return (
+            row.opsNo.toLowerCase().includes(search) ||
+            row.customerCode.toLowerCase().includes(search) ||
+            row.article.toLowerCase().includes(search) ||
+            row.merchant.toLowerCase().includes(search)
+          )
+        })
+      }
+
+      // Sort by Ex-Factory date (nearest first), then by OPS
+      filteredRows.sort((a, b) => {
+        const dateA = new Date(a.exFactoryDate || '9999-12-31')
+        const dateB = new Date(b.exFactoryDate || '9999-12-31')
+        if (dateA.getTime() !== dateB.getTime()) {
+          return dateA.getTime() - dateB.getTime()
+        }
+        return a.opsNo.localeCompare(b.opsNo)
+      })
+
+      return jsonResponse({ success: true, data: filteredRows })
+    }
+
     // ORDERS: Get single order
     if (path.match(/^\/orders\/[^/]+$/) && method === 'GET') {
       const orderId = path.split('/')[2]
@@ -158,7 +335,7 @@ export default async function handler(req: Request, context: Context): Promise<R
       return jsonResponse({ success: true, data: { ...order, tracker } })
     }
 
-    // DASHBOARD: Get stats
+    // DASHBOARD: Get stats (new format for Excel-style view)
     if (path === '/dashboard/stats' && method === 'GET') {
       // Fetch all open orders
       const ordersRef = db.collection('orders').doc('data').collection('orders')
@@ -168,17 +345,6 @@ export default async function handler(req: Request, context: Context): Promise<R
         .map((doc) => ({ id: doc.id, ...doc.data() }))
         .filter((o: any) => o.orderType !== 'samples')
 
-      // Fetch tracker data
-      const trackerPromises = orders.map(async (order: any) => {
-        const trackerDoc = await db.collection('production_tracker').doc(order.id).get()
-        return {
-          order,
-          tracker: trackerDoc.exists ? trackerDoc.data() : null,
-        }
-      })
-
-      const ordersWithTrackers = await Promise.all(trackerPromises)
-
       // Calculate stats
       const now = new Date()
       const weekStart = new Date(now)
@@ -186,14 +352,24 @@ export default async function handler(req: Request, context: Context): Promise<R
       const weekEnd = new Date(weekStart)
       weekEnd.setDate(weekStart.getDate() + 6) // Sunday
 
-      const byStage: Record<string, number> = {}
+      let totalItems = 0
+      let totalPcs = 0
       let overdue = 0
       let thisWeek = 0
+      const byCompany = { EMPL: 0, EHI: 0 }
 
-      ordersWithTrackers.forEach(({ order, tracker }: any) => {
-        // Current stage
-        const currentStage = tracker?.currentStage || 'raw_material_purchase'
-        byStage[currentStage] = (byStage[currentStage] || 0) + 1
+      orders.forEach((order: any) => {
+        // Count items and pieces
+        const items = order.items || []
+        totalItems += items.length
+        totalPcs += items.reduce((sum: number, item: any) => sum + (item.pcs || 0), 0)
+
+        // Company breakdown
+        if (order.companyCode === 'EMPL') {
+          byCompany.EMPL++
+        } else if (order.companyCode === 'EHI') {
+          byCompany.EHI++
+        }
 
         // Overdue check
         const shipDate = new Date(order.shipDate)
@@ -210,12 +386,68 @@ export default async function handler(req: Request, context: Context): Promise<R
       return jsonResponse({
         success: true,
         data: {
-          totalOpen: orders.length,
-          byStage,
+          totalOrders: orders.length,
+          totalItems,
+          totalPcs,
+          byCompany,
           overdue,
           thisWeek,
         },
       })
+    }
+
+    // PRODUCTION TRACKER: Update item-level tracking (Excel row)
+    if (path.match(/^\/production-tracker\/[^/]+\/item\/[^/]+$/) && method === 'PUT') {
+      const parts = path.split('/')
+      const orderId = parts[2]
+      const itemId = parts[4]
+
+      const body = await req.json()
+      const now = new Date().toISOString()
+
+      // Get or create tracker document
+      const trackerRef = db.collection('production_tracker').doc(orderId)
+      const trackerDoc = await trackerRef.get()
+
+      // Build item update
+      const itemUpdate: Partial<ProductionItemTracker> = {
+        ...body,
+        updatedAt: now,
+      }
+
+      // Remove undefined values
+      Object.keys(itemUpdate).forEach((key) => {
+        if (itemUpdate[key as keyof ProductionItemTracker] === undefined) {
+          delete itemUpdate[key as keyof ProductionItemTracker]
+        }
+      })
+
+      if (trackerDoc.exists) {
+        // Update existing
+        await trackerRef.update({
+          [`items.${itemId}`]: {
+            ...trackerDoc.data()?.items?.[itemId],
+            ...itemUpdate,
+          },
+          updatedAt: now,
+        })
+      } else {
+        // Create new tracker with this item
+        await trackerRef.set({
+          opsNo: '',
+          items: {
+            [itemId]: {
+              id: itemId,
+              orderId,
+              ...itemUpdate,
+            },
+          },
+          createdAt: now,
+          updatedAt: now,
+        })
+      }
+
+      return jsonResponse({ success: true })
     }
 
     // PRODUCTION TRACKER: Update single stage

@@ -1,5 +1,36 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
-import type { ProductionTrackerEntry, StageUpdate, TnaStage } from '@/types'
+import type { ProductionTrackerEntry, StageUpdate, TnaStage, ProductionItemTracker } from '@/types'
+
+// Update item-level production tracking (Excel-style row)
+export function useUpdateItemTracker() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: async (params: {
+      orderId: string
+      itemId: string
+      update: Partial<ProductionItemTracker>
+    }) => {
+      const response = await fetch(`/api/production-tracker/${params.orderId}/item/${params.itemId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(params.update)
+      })
+
+      if (!response.ok) {
+        const error = await response.json()
+        throw new Error(error.error || 'Failed to update item')
+      }
+
+      return response.json()
+    },
+    onSuccess: () => {
+      // Invalidate relevant queries
+      queryClient.invalidateQueries({ queryKey: ['production-rows'] })
+      queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] })
+    }
+  })
+}
 
 interface UpdateStageParams {
   orderId: string
@@ -8,7 +39,7 @@ interface UpdateStageParams {
   update: Partial<StageUpdate>
 }
 
-// Update a single stage
+// Update a single TNA stage
 export function useUpdateStage() {
   const queryClient = useQueryClient()
 
@@ -30,6 +61,7 @@ export function useUpdateStage() {
     onSuccess: (_, variables) => {
       // Invalidate relevant queries
       queryClient.invalidateQueries({ queryKey: ['orders'] })
+      queryClient.invalidateQueries({ queryKey: ['production-rows'] })
       queryClient.invalidateQueries({ queryKey: ['order', variables.orderId] })
       queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] })
     }
@@ -61,6 +93,7 @@ export function useBulkUpdateStages() {
     },
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({ queryKey: ['orders'] })
+      queryClient.invalidateQueries({ queryKey: ['production-rows'] })
       queryClient.invalidateQueries({ queryKey: ['order', variables.orderId] })
       queryClient.invalidateQueries({ queryKey: ['dashboard-stats'] })
     }

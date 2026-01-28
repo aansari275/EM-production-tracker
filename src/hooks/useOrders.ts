@@ -1,5 +1,23 @@
 import { useQuery } from '@tanstack/react-query'
-import type { Order, OrderWithTracker, ProductionTrackerEntry, DashboardStats, TnaStage, TNA_STAGES } from '@/types'
+import type { Order, OrderWithTracker, ProductionTrackerEntry, DashboardStats, TnaStage, ProductionRow } from '@/types'
+
+// Fetch production rows (item-level, Excel-style format)
+export function useProductionRows(search?: string) {
+  return useQuery<ProductionRow[]>({
+    queryKey: ['production-rows', search],
+    queryFn: async () => {
+      const params = new URLSearchParams()
+      if (search) params.set('search', search)
+
+      const response = await fetch(`/api/production-rows?${params}`)
+      if (!response.ok) throw new Error('Failed to fetch production data')
+
+      const data = await response.json()
+      return data.data || []
+    },
+    staleTime: 30000, // 30 seconds
+  })
+}
 
 // Fetch open orders (status = 'sent')
 export function useOrders(search?: string) {
@@ -53,7 +71,7 @@ export function useDashboardStats() {
 
 // Helper to determine current stage from tracker
 export function getCurrentStage(tracker: ProductionTrackerEntry | undefined, order: Order): TnaStage {
-  if (!tracker) {
+  if (!tracker?.stages) {
     // No tracker yet, start from first stage
     return 'raw_material_purchase'
   }

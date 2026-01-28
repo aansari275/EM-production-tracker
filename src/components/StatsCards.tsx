@@ -1,8 +1,7 @@
 import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import type { DashboardStats, TNA_STAGE_SHORT_LABELS, TnaStage } from '@/types'
-import { TNA_STAGES } from '@/types'
-import { Package, Clock, AlertTriangle, Calendar } from 'lucide-react'
+import type { DashboardStats } from '@/types'
+import { Package, Layers, Hash, AlertTriangle, Calendar, Building2 } from 'lucide-react'
 
 interface StatsCardsProps {
   stats: DashboardStats | undefined
@@ -12,12 +11,12 @@ interface StatsCardsProps {
 export function StatsCards({ stats, isLoading }: StatsCardsProps) {
   if (isLoading) {
     return (
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {[1, 2, 3, 4].map((i) => (
+      <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
+        {[1, 2, 3, 4, 5, 6].map((i) => (
           <Card key={i} className="animate-pulse">
-            <CardContent className="p-4">
-              <div className="h-8 bg-muted rounded w-16 mb-2" />
-              <div className="h-4 bg-muted rounded w-24" />
+            <CardContent className="p-3">
+              <div className="h-6 bg-muted rounded w-12 mb-1" />
+              <div className="h-3 bg-muted rounded w-20" />
             </CardContent>
           </Card>
         ))}
@@ -28,17 +27,24 @@ export function StatsCards({ stats, isLoading }: StatsCardsProps) {
   const statItems = [
     {
       label: 'Open Orders',
-      value: stats?.totalOpen || 0,
+      value: stats?.totalOrders || 0,
       icon: Package,
       color: 'text-blue-600',
       bgColor: 'bg-blue-50',
     },
     {
-      label: 'In Weaving',
-      value: stats?.byStage?.weaving || 0,
-      icon: Clock,
-      color: 'text-amber-600',
-      bgColor: 'bg-amber-50',
+      label: 'Total Items',
+      value: stats?.totalItems || 0,
+      icon: Layers,
+      color: 'text-indigo-600',
+      bgColor: 'bg-indigo-50',
+    },
+    {
+      label: 'Total Pcs',
+      value: (stats?.totalPcs || 0).toLocaleString(),
+      icon: Hash,
+      color: 'text-purple-600',
+      bgColor: 'bg-purple-50',
     },
     {
       label: 'Overdue',
@@ -54,69 +60,32 @@ export function StatsCards({ stats, isLoading }: StatsCardsProps) {
       color: 'text-green-600',
       bgColor: 'bg-green-50',
     },
+    {
+      label: 'EMPL / EHI',
+      value: `${stats?.byCompany?.EMPL || 0} / ${stats?.byCompany?.EHI || 0}`,
+      icon: Building2,
+      color: 'text-gray-600',
+      bgColor: 'bg-gray-50',
+    },
   ]
 
   return (
-    <div className="space-y-4">
-      {/* Main Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-        {statItems.map((item) => (
-          <Card key={item.label}>
-            <CardContent className="p-4">
-              <div className="flex items-start justify-between">
-                <div>
-                  <p className="text-3xl font-bold">{item.value}</p>
-                  <p className="text-sm text-muted-foreground">{item.label}</p>
-                </div>
-                <div className={`p-2 rounded-lg ${item.bgColor}`}>
-                  <item.icon className={`h-5 w-5 ${item.color}`} />
-                </div>
+    <div className="grid grid-cols-2 md:grid-cols-6 gap-3">
+      {statItems.map((item) => (
+        <Card key={item.label}>
+          <CardContent className="p-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-xl font-bold">{item.value}</p>
+                <p className="text-xs text-muted-foreground">{item.label}</p>
               </div>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
-
-      {/* Stage Breakdown */}
-      {stats?.byStage && (
-        <Card>
-          <CardContent className="p-4">
-            <p className="text-sm font-medium mb-3">Orders by Stage</p>
-            <div className="flex flex-wrap gap-2">
-              {TNA_STAGES.map((stage) => {
-                const count = stats.byStage[stage] || 0
-                if (count === 0) return null
-                return (
-                  <Badge
-                    key={stage}
-                    variant="secondary"
-                    className="text-xs"
-                  >
-                    {getStageShortLabel(stage)}: {count}
-                  </Badge>
-                )
-              })}
+              <div className={`p-1.5 rounded-lg ${item.bgColor}`}>
+                <item.icon className={`h-4 w-4 ${item.color}`} />
+              </div>
             </div>
           </CardContent>
         </Card>
-      )}
+      ))}
     </div>
   )
-}
-
-function getStageShortLabel(stage: TnaStage): string {
-  const labels: Record<TnaStage, string> = {
-    raw_material_purchase: 'Raw Mat.',
-    dyeing: 'Dyeing',
-    photo_shoot_approval: 'Photo',
-    first_piece_approval: 'First Pc',
-    weaving: 'Weaving',
-    finishing: 'Finishing',
-    fg_godown: 'FG',
-    order_label_in_house: 'Labels',
-    inspection: 'Insp.',
-    packing: 'Packing',
-    dispatch: 'Dispatch',
-  }
-  return labels[stage] || stage
 }

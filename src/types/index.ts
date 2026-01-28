@@ -77,13 +77,44 @@ export interface StageUpdate {
   updatedBy?: string          // For audit
 }
 
-// ============== Production Tracker Types ==============
+// ============== Production Tracker Types (Excel-style) ==============
 
+// Item-level tracking (matches Excel row)
+export interface ProductionItemTracker {
+  id: string                  // itemId from order
+  orderId: string             // Parent order ID
+  opsNo: string               // e.g., "EM-25-444"
+
+  // Production tracking fields (editable by PPC)
+  status: string              // Free text: "Running on loom & Cutoff- 15 Feb"
+  rcvdPcs: number             // Received pieces
+  toRcvdPcs: number           // To receive (calculated: orderPcs - rcvdPcs)
+  oldStock: number            // Old stock pieces
+  bazarDone: number           // Bazar done pieces
+  uFinishing: number          // Under finishing pieces
+  packed: number              // Packed pieces
+
+  // Vendor/Folio tracking
+  vendorName?: string
+  folioNo?: string
+  supplierCompletionDate?: string
+
+  updatedAt: string
+  updatedBy?: string
+}
+
+// Order-level tracker entry (groups item trackers)
 export interface ProductionTrackerEntry {
   id: string                  // Same as order ID
   opsNo: string               // e.g., "OPS-25881"
-  stages: Record<TnaStage, StageUpdate>
-  currentStage: TnaStage      // Current active stage
+
+  // Item-level tracking
+  items: Record<string, ProductionItemTracker>  // keyed by item ID
+
+  // TNA stage tracking (optional, for TNA tab)
+  stages?: Record<TnaStage, StageUpdate>
+  currentStage?: TnaStage
+
   createdAt: string
   updatedAt: string
 }
@@ -105,6 +136,9 @@ export interface OrderItem {
   emDesignName?: string
   color?: string
   quality?: string
+  // Additional fields from import
+  contractorName?: string
+  folioNo?: string
 }
 
 export interface Order {
@@ -116,6 +150,7 @@ export interface Order {
   companyCode: CompanyCode
   orderConfirmationDate: string
   merchantCode: string
+  assistantMerchantCode?: string
   managedBy: string
   poNo: string
   buyerPoShipDate: string
@@ -128,6 +163,42 @@ export interface Order {
   status: 'draft' | 'submitted' | 'sent' | 'shipped'
   createdAt: string
   updatedAt: string
+}
+
+// Flattened row for Excel-style display (one row per item)
+export interface ProductionRow {
+  // From Order
+  orderId: string
+  companyCode: CompanyCode    // "Handled" column
+  customerCode: string        // Buyer Code
+  merchant: string            // Merchant (with assistant)
+  poDate: string              // PO Rcvd Date
+  exFactoryDate: string       // Ex-Factory Date
+  opsNo: string               // OPS # (formatted)
+
+  // From OrderItem
+  itemId: string
+  article: string             // Article name / EM Design
+  size: string
+  color: string
+  quality: string
+  orderPcs: number            // ORDER PCS
+
+  // From ProductionItemTracker (editable)
+  status: string              // Free text status
+  rcvdPcs: number
+  toRcvdPcs: number
+  oldStock: number
+  bazarDone: number
+  uFinishing: number
+  packed: number
+
+  // Vendor info
+  vendorName: string
+  folioNo: string
+  supplierCompletionDate: string
+  orderIssueDate: string
+  orderType: string           // J, P, etc.
 }
 
 // Combined order with tracker data for display
@@ -146,8 +217,10 @@ export interface ApiResponse<T> {
 // ============== Dashboard Stats ==============
 
 export interface DashboardStats {
-  totalOpen: number
-  byStage: Record<TnaStage, number>
+  totalOrders: number
+  totalItems: number
+  totalPcs: number
+  byCompany: { EMPL: number; EHI: number }
   overdue: number
   thisWeek: number
 }
