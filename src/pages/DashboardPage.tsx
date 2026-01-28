@@ -18,7 +18,6 @@ import { StatsCards } from '@/components/StatsCards'
 import { ProductionTable } from '@/components/ProductionTable'
 import { TnaView } from '@/components/TnaView'
 import { ExcelUpload } from '@/components/ExcelUpload'
-import { OrderSummaryTab } from '@/components/OrderSummaryTab'
 import {
   Factory,
   LogOut,
@@ -33,9 +32,7 @@ import {
   User,
   AlertTriangle,
   Clock,
-  ListOrdered,
   AlertCircle,
-  Package,
   FileSpreadsheet,
 } from 'lucide-react'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
@@ -449,12 +446,8 @@ export function DashboardPage() {
         <StatsCards stats={stats} isLoading={!stats} />
 
         {/* Tabs for different views */}
-        <Tabs defaultValue="order-summary" className="w-full">
+        <Tabs defaultValue="orders" className="w-full">
           <TabsList>
-            <TabsTrigger value="order-summary" className="gap-2">
-              <ListOrdered className="h-4 w-4" />
-              Order Summary
-            </TabsTrigger>
             <TabsTrigger value="orders" className="gap-2">
               <Table className="h-4 w-4" />
               Order Status
@@ -474,10 +467,6 @@ export function DashboardPage() {
             <div className="bg-card rounded-lg border shadow-sm">
               <ProductionTable rows={filteredRows} isLoading={rowsLoading} />
             </div>
-          </TabsContent>
-
-          <TabsContent value="order-summary">
-            <OrderSummaryTab />
           </TabsContent>
 
           <TabsContent value="tna">
