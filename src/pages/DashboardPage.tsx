@@ -17,6 +17,7 @@ import { StatsCards } from '@/components/StatsCards'
 import { ProductionTable } from '@/components/ProductionTable'
 import { TnaView } from '@/components/TnaView'
 import { ExcelUpload } from '@/components/ExcelUpload'
+import { OrderSummaryTab } from '@/components/OrderSummaryTab'
 import {
   Factory,
   LogOut,
@@ -31,6 +32,7 @@ import {
   User,
   AlertTriangle,
   Clock,
+  ListOrdered,
 } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 import type { ProductionRow } from '@/types'
@@ -406,6 +408,10 @@ export function DashboardPage() {
                 </Badge>
               )}
             </TabsTrigger>
+            <TabsTrigger value="order-summary" className="gap-2">
+              <ListOrdered className="h-4 w-4" />
+              Order Summary
+            </TabsTrigger>
             <TabsTrigger value="tna" className="gap-2">
               <Calendar className="h-4 w-4" />
               TNA Timeline
@@ -416,6 +422,10 @@ export function DashboardPage() {
             <div className="bg-card rounded-lg border shadow-sm">
               <ProductionTable rows={filteredRows} isLoading={rowsLoading} />
             </div>
+          </TabsContent>
+
+          <TabsContent value="order-summary">
+            <OrderSummaryTab />
           </TabsContent>
 
           <TabsContent value="tna">
