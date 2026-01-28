@@ -100,12 +100,10 @@ interface ProductionRow {
   quality: string
   orderPcs: number
   status: string
-  rcvdPcs: number
-  toRcvdPcs: number
+  bazarDone: number       // Rcvd - from RCVD PCS column
+  toRcvdPcs: number       // To Rcvd - from TO RCVD PCS column
   oldStock: number
-  bazarDone: number
-  uFinishing: number
-  packed: number
+  uFinishing: number      // Finish - from U/FINISHING column
   vendorName: string
   folioNo: string
   supplierCompletionDate: string
@@ -273,12 +271,10 @@ export default async function handler(req: Request, context: Context): Promise<R
             quality: item.quality || '',
             orderPcs: item.pcs || 0,
             status: itemTracker.status || '',
-            rcvdPcs: itemTracker.rcvdPcs || 0,
-            toRcvdPcs: (item.pcs || 0) - (itemTracker.rcvdPcs || 0),
+            bazarDone: itemTracker.bazarDone || 0,           // Rcvd (from RCVD PCS)
+            toRcvdPcs: itemTracker.toRcvdPcs || 0,           // To Rcvd (from TO RCVD PCS)
             oldStock: itemTracker.oldStock || 0,
-            bazarDone: itemTracker.bazarDone || 0,
-            uFinishing: itemTracker.uFinishing || 0,
-            packed: itemTracker.packed || 0,
+            uFinishing: itemTracker.uFinishing || 0,         // Finish
             vendorName: item.contractorName || itemTracker.vendorName || '',
             folioNo: item.folioNo || itemTracker.folioNo || '',
             supplierCompletionDate: itemTracker.supplierCompletionDate || '',
@@ -476,11 +472,10 @@ export default async function handler(req: Request, context: Context): Promise<R
 
         const itemUpdate = {
           status: row.status || '',
-          rcvdPcs: row.rcvdPcs || 0,
+          bazarDone: row.bazarDone || 0,      // Rcvd (from RCVD PCS column)
+          toRcvdPcs: row.toRcvdPcs || 0,      // To Rcvd (from TO RCVD PCS column)
           oldStock: row.oldStock || 0,
-          bazarDone: row.bazarDone || 0,
-          uFinishing: row.uFinishing || 0,
-          packed: row.packed || 0,
+          uFinishing: row.uFinishing || 0,    // Finish
           updatedAt: now,
         }
 

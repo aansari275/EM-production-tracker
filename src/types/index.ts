@@ -185,13 +185,15 @@ export interface ProductionRow {
   orderPcs: number            // ORDER PCS
 
   // From ProductionItemTracker (editable)
+  // Column mapping from Excel:
+  // - RCVD PCS → bazarDone (displayed as "Rcvd")
+  // - TO RCVD PCS → toRcvdPcs (displayed as "To Rcvd")
+  // - U/FINISHING → uFinishing (displayed as "Finish")
   status: string              // Free text status
-  rcvdPcs: number
-  toRcvdPcs: number
-  oldStock: number
-  bazarDone: number
-  uFinishing: number
-  packed: number
+  bazarDone: number           // Rcvd - from RCVD PCS column (bazar done qty)
+  toRcvdPcs: number           // To Rcvd - from TO RCVD PCS column (bazar pending)
+  oldStock: number            // Old stock pieces
+  uFinishing: number          // Finish - from U/FINISHING column
 
   // Vendor info
   vendorName: string

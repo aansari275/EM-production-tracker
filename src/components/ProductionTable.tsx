@@ -116,9 +116,7 @@ export function ProductionTable({ rows, isLoading }: ProductionTableProps) {
             <TableHead className="w-48 font-bold bg-yellow-100">Status</TableHead>
             <TableHead className="w-16 font-bold text-right bg-green-100">Rcvd</TableHead>
             <TableHead className="w-16 font-bold text-right bg-orange-100">To Rcvd</TableHead>
-            <TableHead className="w-16 font-bold text-right bg-blue-100">Bazar</TableHead>
             <TableHead className="w-16 font-bold text-right bg-purple-100">Finish</TableHead>
-            <TableHead className="w-16 font-bold text-right bg-teal-100">Packed</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -127,8 +125,8 @@ export function ProductionTable({ rows, isLoading }: ProductionTableProps) {
             const isNewOps = row.opsNo !== lastOps
             lastOps = row.opsNo
 
-            // Calculate toRcvd
-            const toRcvd = row.orderPcs - row.rcvdPcs
+            // Calculate toRcvd (Bazar Pending = Order Pcs - Bazar Done)
+            const toRcvd = row.orderPcs - (row.bazarDone || 0)
 
             return (
               <TableRow
@@ -212,31 +210,8 @@ export function ProductionTable({ rows, isLoading }: ProductionTableProps) {
                   )}
                 </TableCell>
 
-                {/* Rcvd Pcs - Editable */}
+                {/* Rcvd (Bazar Done) - Editable */}
                 <TableCell className="text-right bg-green-50">
-                  <EditableNumberCell
-                    rowKey={rowKey}
-                    field="rcvdPcs"
-                    value={row.rcvdPcs}
-                    editingCell={editingCell}
-                    editValue={editValue}
-                    startEdit={startEdit}
-                    setEditValue={setEditValue}
-                    saveEdit={() => saveEdit(row.orderId, row.itemId, 'rcvdPcs', editValue)}
-                    handleKeyDown={(e) => handleKeyDown(e, row.orderId, row.itemId, 'rcvdPcs')}
-                  />
-                </TableCell>
-
-                {/* To Rcvd - Calculated */}
-                <TableCell className={cn(
-                  'text-right bg-orange-50 font-medium',
-                  toRcvd > 0 && 'text-orange-600'
-                )}>
-                  {toRcvd}
-                </TableCell>
-
-                {/* Bazar Done - Editable */}
-                <TableCell className="text-right bg-blue-50">
                   <EditableNumberCell
                     rowKey={rowKey}
                     field="bazarDone"
@@ -250,7 +225,15 @@ export function ProductionTable({ rows, isLoading }: ProductionTableProps) {
                   />
                 </TableCell>
 
-                {/* U/Finishing - Editable */}
+                {/* To Rcvd (Bazar Pending) - from Excel or calculated */}
+                <TableCell className={cn(
+                  'text-right bg-orange-50 font-medium',
+                  (row.toRcvdPcs || toRcvd) > 0 && 'text-orange-600'
+                )}>
+                  {row.toRcvdPcs || toRcvd}
+                </TableCell>
+
+                {/* Finish (U/Finishing) - Editable */}
                 <TableCell className="text-right bg-purple-50">
                   <EditableNumberCell
                     rowKey={rowKey}
@@ -262,21 +245,6 @@ export function ProductionTable({ rows, isLoading }: ProductionTableProps) {
                     setEditValue={setEditValue}
                     saveEdit={() => saveEdit(row.orderId, row.itemId, 'uFinishing', editValue)}
                     handleKeyDown={(e) => handleKeyDown(e, row.orderId, row.itemId, 'uFinishing')}
-                  />
-                </TableCell>
-
-                {/* Packed - Editable */}
-                <TableCell className="text-right bg-teal-50">
-                  <EditableNumberCell
-                    rowKey={rowKey}
-                    field="packed"
-                    value={row.packed}
-                    editingCell={editingCell}
-                    editValue={editValue}
-                    startEdit={startEdit}
-                    setEditValue={setEditValue}
-                    saveEdit={() => saveEdit(row.orderId, row.itemId, 'packed', editValue)}
-                    handleKeyDown={(e) => handleKeyDown(e, row.orderId, row.itemId, 'packed')}
                   />
                 </TableCell>
               </TableRow>

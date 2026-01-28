@@ -25,11 +25,10 @@ interface ParsedRow {
   size: string
   color: string
   status: string
-  rcvdPcs: number
+  bazarDone: number      // From "RCVD PCS" column - bazar done qty
+  toRcvdPcs: number      // From "TO RCVD PCS" column - bazar pending
   oldStock: number
-  bazarDone: number
   uFinishing: number
-  packed: number
 }
 
 interface UploadResult {
@@ -83,18 +82,19 @@ export function ExcelUpload({ open, onOpenChange }: ExcelUploadProps) {
 
       const headers = jsonData[headerRowIndex].map((h: any) => String(h || '').trim())
 
-      // Find column indices
+      // Find column indices - mapped to actual Excel headers
       const colIndices = {
         opsNo: headers.findIndex((h: string) => h.includes('OPS')),
         article: headers.findIndex((h: string) => h === 'Article'),
         size: headers.findIndex((h: string) => h === 'SIZE'),
         color: headers.findIndex((h: string) => h === 'COLOR'),
         status: headers.findIndex((h: string) => h === 'Status'),
-        rcvdPcs: headers.findIndex((h: string) => h.includes('RCVD PCS')),
+        // RCVD PCS = Bazar Done (received from production)
+        bazarDone: headers.findIndex((h: string) => h === 'RCVD PCS' || h.includes('RCVD PCS')),
+        // TO RCVD PCS = Bazar Pending
+        toRcvdPcs: headers.findIndex((h: string) => h === 'TO RCVD PCS' || h.includes('TO RCVD')),
         oldStock: headers.findIndex((h: string) => h.includes('OLD STOCK')),
-        bazarDone: headers.findIndex((h: string) => h.includes('BAZAR DONE')),
         uFinishing: headers.findIndex((h: string) => h.includes('U/FINISHING')),
-        packed: headers.findIndex((h: string) => h === 'Packed'),
       }
 
       // Validate required columns
@@ -118,11 +118,10 @@ export function ExcelUpload({ open, onOpenChange }: ExcelUploadProps) {
           size: colIndices.size >= 0 ? String(row[colIndices.size] || '').trim() : '',
           color: colIndices.color >= 0 ? String(row[colIndices.color] || '').trim() : '',
           status: colIndices.status >= 0 ? String(row[colIndices.status] || '').trim() : '',
-          rcvdPcs: colIndices.rcvdPcs >= 0 ? parseInt(row[colIndices.rcvdPcs]) || 0 : 0,
-          oldStock: colIndices.oldStock >= 0 ? parseInt(row[colIndices.oldStock]) || 0 : 0,
           bazarDone: colIndices.bazarDone >= 0 ? parseInt(row[colIndices.bazarDone]) || 0 : 0,
+          toRcvdPcs: colIndices.toRcvdPcs >= 0 ? parseInt(row[colIndices.toRcvdPcs]) || 0 : 0,
+          oldStock: colIndices.oldStock >= 0 ? parseInt(row[colIndices.oldStock]) || 0 : 0,
           uFinishing: colIndices.uFinishing >= 0 ? parseInt(row[colIndices.uFinishing]) || 0 : 0,
-          packed: colIndices.packed >= 0 ? parseInt(row[colIndices.packed]) || 0 : 0,
         })
       }
 
@@ -288,8 +287,8 @@ export function ExcelUpload({ open, onOpenChange }: ExcelUploadProps) {
                             <th className="p-2 text-left">Size</th>
                             <th className="p-2 text-left">Status</th>
                             <th className="p-2 text-right">Rcvd</th>
-                            <th className="p-2 text-right">Bazar</th>
-                            <th className="p-2 text-right">Packed</th>
+                            <th className="p-2 text-right">To Rcvd</th>
+                            <th className="p-2 text-right">Finish</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -299,9 +298,9 @@ export function ExcelUpload({ open, onOpenChange }: ExcelUploadProps) {
                               <td className="p-2 truncate max-w-[120px]">{row.article}</td>
                               <td className="p-2">{row.size}</td>
                               <td className="p-2 truncate max-w-[150px]">{row.status}</td>
-                              <td className="p-2 text-right">{row.rcvdPcs}</td>
                               <td className="p-2 text-right">{row.bazarDone}</td>
-                              <td className="p-2 text-right">{row.packed}</td>
+                              <td className="p-2 text-right">{row.toRcvdPcs}</td>
+                              <td className="p-2 text-right">{row.uFinishing}</td>
                             </tr>
                           ))}
                         </tbody>
@@ -310,7 +309,7 @@ export function ExcelUpload({ open, onOpenChange }: ExcelUploadProps) {
                   </div>
 
                   <div className="text-xs text-muted-foreground">
-                    <strong>Fields to update:</strong> Status, Rcvd Pcs, Old Stock, Bazar Done, U/Finishing, Packed
+                    <strong>Fields to update:</strong> Status, Rcvd (Bazar Done), To Rcvd (Bazar Pending), Finish (U/Finishing)
                   </div>
                 </>
               )}
