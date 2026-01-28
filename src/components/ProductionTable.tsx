@@ -102,21 +102,19 @@ export function ProductionTable({ rows, isLoading }: ProductionTableProps) {
       <Table className="text-xs">
         <TableHeader className="sticky top-0 bg-gray-100 z-10">
           <TableRow className="border-b-2">
-            <TableHead className="w-16 font-bold text-center bg-gray-200">Handled</TableHead>
-            <TableHead className="w-16 font-bold bg-gray-200">Buyer</TableHead>
-            <TableHead className="w-24 font-bold bg-gray-200">Merchant</TableHead>
-            <TableHead className="w-20 font-bold bg-gray-200">PO Date</TableHead>
-            <TableHead className="w-20 font-bold bg-gray-200">Ex-Factory</TableHead>
-            <TableHead className="w-24 font-bold bg-gray-200">OPS #</TableHead>
-            <TableHead className="w-32 font-bold bg-gray-200">Article</TableHead>
-            <TableHead className="w-20 font-bold bg-gray-200">Size</TableHead>
-            <TableHead className="w-24 font-bold bg-gray-200">Color</TableHead>
-            <TableHead className="w-24 font-bold bg-gray-200">Quality</TableHead>
-            <TableHead className="w-16 font-bold text-right bg-gray-200">Order Pcs</TableHead>
-            <TableHead className="w-48 font-bold bg-yellow-100">Status</TableHead>
-            <TableHead className="w-16 font-bold text-right bg-green-100">Rcvd</TableHead>
-            <TableHead className="w-16 font-bold text-right bg-orange-100">To Rcvd</TableHead>
-            <TableHead className="w-16 font-bold text-right bg-purple-100">Finish</TableHead>
+            <TableHead className="w-20 font-bold bg-gray-200">OPS #</TableHead>
+            <TableHead className="w-14 font-bold bg-gray-200">Buyer</TableHead>
+            <TableHead className="w-28 font-bold bg-gray-200">Article</TableHead>
+            <TableHead className="w-16 font-bold bg-gray-200">Size</TableHead>
+            <TableHead className="w-14 font-bold text-right bg-gray-200">Pcs</TableHead>
+            <TableHead className="w-40 font-bold bg-yellow-100">Status</TableHead>
+            <TableHead className="w-14 font-bold text-right bg-green-100">Rcvd</TableHead>
+            <TableHead className="w-14 font-bold text-right bg-orange-100">To Rcvd</TableHead>
+            <TableHead className="w-14 font-bold text-right bg-purple-100">Finish</TableHead>
+            <TableHead className="w-16 font-bold bg-gray-200">Ex-Fact</TableHead>
+            <TableHead className="w-20 font-bold bg-gray-200">Color</TableHead>
+            <TableHead className="w-20 font-bold bg-gray-200">Quality</TableHead>
+            <TableHead className="w-14 font-bold text-center bg-gray-200">Co.</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -136,54 +134,19 @@ export function ProductionTable({ rows, isLoading }: ProductionTableProps) {
                   isNewOps && index > 0 && 'border-t-2 border-gray-300'
                 )}
               >
-                {/* Handled (Company) */}
-                <TableCell className="text-center font-medium">
-                  <Badge
-                    variant={row.companyCode === 'EMPL' ? 'default' : 'secondary'}
-                    className="text-[10px]"
-                  >
-                    {row.companyCode}
-                  </Badge>
-                </TableCell>
+                {/* OPS # */}
+                <TableCell className="font-mono font-medium text-xs">{row.opsNo}</TableCell>
 
                 {/* Buyer Code */}
                 <TableCell className="font-medium">{row.customerCode}</TableCell>
 
-                {/* Merchant */}
-                <TableCell className="truncate max-w-[100px]" title={row.merchant}>
-                  {row.merchant}
-                </TableCell>
-
-                {/* PO Date */}
-                <TableCell>{formatDateShort(row.poDate)}</TableCell>
-
-                {/* Ex-Factory */}
-                <TableCell className={cn(
-                  isOverdue(row.exFactoryDate) && 'text-red-600 font-medium'
-                )}>
-                  {formatDateShort(row.exFactoryDate)}
-                </TableCell>
-
-                {/* OPS # */}
-                <TableCell className="font-mono font-medium">{row.opsNo}</TableCell>
-
                 {/* Article */}
-                <TableCell className="truncate max-w-[120px]" title={row.article}>
+                <TableCell className="truncate max-w-[100px]" title={row.article}>
                   {row.article}
                 </TableCell>
 
                 {/* Size */}
-                <TableCell>{row.size}</TableCell>
-
-                {/* Color */}
-                <TableCell className="truncate max-w-[100px]" title={row.color}>
-                  {row.color}
-                </TableCell>
-
-                {/* Quality */}
-                <TableCell className="truncate max-w-[100px]" title={row.quality}>
-                  {row.quality}
-                </TableCell>
+                <TableCell className="text-xs">{row.size}</TableCell>
 
                 {/* Order Pcs */}
                 <TableCell className="text-right font-medium">{row.orderPcs}</TableCell>
@@ -246,6 +209,34 @@ export function ProductionTable({ rows, isLoading }: ProductionTableProps) {
                     saveEdit={() => saveEdit(row.orderId, row.itemId, 'uFinishing', editValue)}
                     handleKeyDown={(e) => handleKeyDown(e, row.orderId, row.itemId, 'uFinishing')}
                   />
+                </TableCell>
+
+                {/* Ex-Factory */}
+                <TableCell className={cn(
+                  'text-xs',
+                  isOverdue(row.exFactoryDate) && 'text-red-600 font-medium'
+                )}>
+                  {formatDateShort(row.exFactoryDate)}
+                </TableCell>
+
+                {/* Color */}
+                <TableCell className="truncate max-w-[80px] text-xs" title={row.color}>
+                  {row.color}
+                </TableCell>
+
+                {/* Quality */}
+                <TableCell className="truncate max-w-[80px] text-xs" title={row.quality}>
+                  {row.quality}
+                </TableCell>
+
+                {/* Company (Handled) */}
+                <TableCell className="text-center">
+                  <Badge
+                    variant={row.companyCode === 'EMPL' ? 'default' : 'secondary'}
+                    className="text-[9px] px-1"
+                  >
+                    {row.companyCode}
+                  </Badge>
                 </TableCell>
               </TableRow>
             )
