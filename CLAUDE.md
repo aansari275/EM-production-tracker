@@ -1,7 +1,10 @@
 # Eastern Mills Production Tracker
 
 ## Project Overview
-TNA Stage Tracker app for the Production Planning & Control (PPC) team to track and update production status of all open orders.
+Excel-style production tracker for the Production Planning & Control (PPC) team. Matches the "Running Order Status" Excel format that PPC uses daily.
+
+**Live URL**: https://em-production-tracker.netlify.app
+**PIN**: ppc2024
 
 ## Tech Stack
 - **Frontend**: React 18 + TypeScript, Vite, Tailwind CSS, shadcn/ui
@@ -16,31 +19,76 @@ TNA Stage Tracker app for the Production Planning & Control (PPC) team to track 
 - Session stored in localStorage
 
 ## Key Features
-- View all open orders (status: 'sent')
-- Update TNA stage progress (actual dates, status, notes)
-- Dashboard stats (by stage, overdue, etc.)
+
+### 1. Excel-Style Production Table
+- Item-level rows (one row per order item, like the Excel)
+- Columns: Handled, Buyer, Merchant, PO Date, Ex-Factory, OPS #, Article, Size, Color, Quality, Order Pcs, Status, Rcvd, To Rcvd, Bazar, Finish, Packed
+- Inline editing: Click any editable cell to update
+- Color-coded columns matching Excel (yellow for Status, green for Rcvd, etc.)
+- Visual separation between different OPS numbers
+
+### 2. Search & Filters
+- **Search**: OPS #, Buyer Code, Article name, Merchant
+- **Company Filter**: All / EMPL Only / EHI Only
+- **Buyer Filter**: Quick dropdown for buyer selection
+- **Status Filters**: Overdue Only / This Week Only
+- Active filters bar shows applied filters with clear buttons
+
+### 3. Excel Bulk Upload
+- Upload "Running Order Status" Excel for bulk status updates
+- **Only updates status fields** (does not add new items):
+  - Status (free text)
+  - Rcvd Pcs, Old Stock, Bazar Done, U/Finishing, Packed
+- Matches existing items by OPS # + Article + Size + Color
+- Preview before upload, shows results summary
+
+### 4. TNA Timeline View
+- Separate tab for visual TNA stage tracking
+- Grouped by OPS number with expandable sections
+- 11-stage vertical timeline with status indicators
+- Click to update stage status
+
+### 5. Dashboard Stats
+- Total Orders, Total Items, Total Pcs
+- Overdue orders count
+- This Week's ex-factory
+- EMPL / EHI company breakdown
 
 ## Data Model
 
 ### Reading from Orders (Read-Only)
-- `orders/data/orders` - Order details, TNA target dates
-- `ops_no` - OPS registry
+- `orders/data/orders` - Order details, items, TNA target dates
+- `merchants` - Merchant names for display
 
-### New Collection: `production_tracker`
+### Collection: `production_tracker`
 ```typescript
 interface ProductionTrackerEntry {
   id: string                    // Same as order ID
-  opsNo: string                 // e.g., "OPS-25881"
-  stages: {
+  opsNo: string                 // e.g., "EM-26-881"
+
+  // Item-level tracking (keyed by item ID)
+  items: {
+    [itemId: string]: {
+      status: string            // Free text: "Running on loom & Cutoff- 15 Feb"
+      rcvdPcs: number
+      oldStock: number
+      bazarDone: number
+      uFinishing: number
+      packed: number
+      updatedAt: string
+    }
+  }
+
+  // TNA stage tracking (optional, for TNA tab)
+  stages?: {
     [stage: TnaStage]: {
-      actualDate: string | null  // ISO date when actually completed
+      actualDate: string | null
       status: 'pending' | 'in_progress' | 'completed'
       notes?: string
       updatedAt: string
-      updatedBy?: string
     }
   }
-  currentStage: TnaStage
+
   createdAt: string
   updatedAt: string
 }
@@ -64,9 +112,11 @@ interface ProductionTrackerEntry {
 |----------|--------|-------------|
 | `/api/auth/verify` | POST | Verify PIN |
 | `/api/orders` | GET | List open orders (status=sent) |
-| `/api/production-tracker` | GET | List all tracker entries |
-| `/api/production-tracker/:id` | GET/PUT | Get/update tracker entry |
-| `/api/production-tracker/:id/stage/:stage` | PUT | Update single stage |
+| `/api/production-rows` | GET | Get item-level rows (Excel format) |
+| `/api/dashboard/stats` | GET | Dashboard statistics |
+| `/api/production-tracker/:id/item/:itemId` | PUT | Update item status |
+| `/api/production-tracker/:id/stage/:stage` | PUT | Update TNA stage |
+| `/api/production-tracker/bulk-update` | POST | Bulk update from Excel |
 
 ## Environment Variables
 ```bash
@@ -76,14 +126,44 @@ FIREBASE_CLIENT_EMAIL=firebase-adminsdk-fbsvc@easternmillscom.iam.gserviceaccoun
 FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
 
 # PPC Access
-PPC_ACCESS_PIN=<shared-pin-for-ppc-team>
+PPC_ACCESS_PIN=ppc2024
 ```
 
 ## Local Development
 ```bash
+npm install
 npm run dev  # Starts Netlify dev server at http://localhost:8888
 ```
 
 ## Deployment
-- **Netlify Site**: TBD
-- Auto-deploys from `main` branch
+- **Netlify Site**: em-production-tracker
+- **Site ID**: 41e47928-41a1-4dc6-8ec3-69fba71e90da
+- Auto-deploys from `main` branch on GitHub
+- Manual deploy: `netlify deploy --prod`
+
+## File Structure
+```
+src/
+├── components/
+│   ├── ProductionTable.tsx    # Main Excel-style table
+│   ├── TnaView.tsx            # TNA timeline view
+│   ├── StatsCards.tsx         # Dashboard stats
+│   ├── ExcelUpload.tsx        # Bulk upload dialog
+│   └── ui/                    # shadcn/ui components
+├── hooks/
+│   ├── useOrders.ts           # Fetch orders & production rows
+│   └── useProductionTracker.ts # Update mutations
+├── pages/
+│   ├── LoginPage.tsx
+│   └── DashboardPage.tsx
+├── contexts/
+│   └── AuthContext.tsx
+├── types/
+│   └── index.ts
+└── lib/
+    ├── firebase.ts
+    └── utils.ts
+
+netlify/functions/
+└── api.mts                    # All API endpoints
+```
