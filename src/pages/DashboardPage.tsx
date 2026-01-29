@@ -1,7 +1,6 @@
-import { useState, useEffect, useRef, useMemo } from 'react'
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useProductionRows, useDashboardStats, useNewOrders } from '@/hooks/useOrders'
-import { formatDistanceToNow } from 'date-fns'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -14,7 +13,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { StatsCards } from '@/components/StatsCards'
 import { ProductionTable } from '@/components/ProductionTable'
 import { TnaView } from '@/components/TnaView'
 import { ExcelUpload } from '@/components/ExcelUpload'
@@ -32,12 +30,11 @@ import {
   User,
   AlertTriangle,
   Clock,
-  AlertCircle,
   FileSpreadsheet,
+  Package,
+  AlertCircle,
 } from 'lucide-react'
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { useQueryClient } from '@tanstack/react-query'
-import type { ProductionRow } from '@/types'
 
 type FilterType = {
   company: 'all' | 'EMPL' | 'EHI'
@@ -54,6 +51,9 @@ export function DashboardPage() {
   const [debouncedSearch, setDebouncedSearch] = useState('')
   const debounceRef = useRef<NodeJS.Timeout>()
   const [showExcelUpload, setShowExcelUpload] = useState(false)
+  const [isDragging, setIsDragging] = useState(false)
+  const dropZoneRef = useRef<HTMLDivElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   // Filters
   const [filters, setFilters] = useState<FilterType>({
@@ -63,6 +63,51 @@ export function DashboardPage() {
     overdue: false,
     thisWeek: false,
   })
+
+  // Drag and drop handlers
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragging(true)
+  }, [])
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragging(false)
+  }, [])
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    setIsDragging(false)
+
+    const files = e.dataTransfer.files
+    if (files.length > 0) {
+      const file = files[0]
+      if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
+        setShowExcelUpload(true)
+        // Pass the file to ExcelUpload via a custom event
+        setTimeout(() => {
+          window.dispatchEvent(new CustomEvent('excel-file-dropped', { detail: file }))
+        }, 100)
+      }
+    }
+  }, [])
+
+  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file) {
+      setShowExcelUpload(true)
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('excel-file-dropped', { detail: file }))
+      }, 100)
+    }
+    // Reset input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ''
+    }
+  }, [])
 
   const { data: rows = [], isLoading: rowsLoading, isFetching } = useProductionRows(debouncedSearch)
   const { data: stats } = useDashboardStats()
@@ -83,18 +128,13 @@ export function DashboardPage() {
     }
   }, [search])
 
-  // Extract unique buyers and merchants for filter dropdowns
-  const { buyers, merchants } = useMemo(() => {
+  // Extract unique buyers for filter dropdowns
+  const buyers = useMemo(() => {
     const buyerSet = new Set<string>()
-    const merchantSet = new Set<string>()
     rows.forEach((row) => {
       if (row.customerCode) buyerSet.add(row.customerCode)
-      if (row.merchant) merchantSet.add(row.merchant)
     })
-    return {
-      buyers: Array.from(buyerSet).sort(),
-      merchants: Array.from(merchantSet).sort(),
-    }
+    return Array.from(buyerSet).sort()
   }, [rows])
 
   // Apply client-side filters
@@ -162,51 +202,175 @@ export function DashboardPage() {
     (filters.overdue ? 1 : 0) +
     (filters.thisWeek ? 1 : 0)
 
-  // Get today's date formatted
-  const today = new Date().toLocaleDateString('en-GB', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-  })
-
   return (
-    <div className="min-h-screen bg-background">
-      {/* Header - Excel style */}
-      <header className="border-b bg-card sticky top-0 z-20">
-        <div className="px-4 py-3 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 bg-green-600 rounded flex items-center justify-center">
-              <Factory className="h-5 w-5 text-white" />
+    <div className="min-h-screen bg-gray-50">
+      {/* Minimal Header */}
+      <header className="bg-white border-b sticky top-0 z-20">
+        <div className="px-4 py-2 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 bg-green-600 rounded flex items-center justify-center">
+              <Factory className="h-4 w-4 text-white" />
             </div>
-            <div>
-              <h1 className="text-lg font-semibold">Running Order Status</h1>
-              <p className="text-xs text-muted-foreground">Date: {today}</p>
-            </div>
+            <span className="font-semibold text-gray-800">Production Tracker</span>
           </div>
 
           <div className="flex items-center gap-2">
+            {/* Refresh */}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleRefresh}
+              disabled={isFetching}
+              className="h-8"
+            >
+              <RefreshCw className={`h-4 w-4 ${isFetching ? 'animate-spin' : ''}`} />
+            </Button>
+
+            {/* Logout */}
+            <Button variant="ghost" size="sm" onClick={logout} className="h-8">
+              <LogOut className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+      </header>
+
+      {/* Main Content */}
+      <main className="p-4 max-w-7xl mx-auto space-y-4">
+        {/* CENTRAL UPLOAD ZONE - Hero Section */}
+        <div
+          ref={dropZoneRef}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+          onClick={() => fileInputRef.current?.click()}
+          className={`
+            relative cursor-pointer transition-all duration-200
+            rounded-xl border-2 border-dashed p-6
+            ${isDragging
+              ? 'border-green-500 bg-green-50 scale-[1.01]'
+              : 'border-gray-300 bg-white hover:border-green-400 hover:bg-green-50/50'
+            }
+          `}
+        >
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".xlsx,.xls"
+            className="hidden"
+            onChange={handleFileSelect}
+          />
+
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
+            <div className={`
+              w-16 h-16 rounded-full flex items-center justify-center transition-colors
+              ${isDragging ? 'bg-green-500 text-white' : 'bg-green-100 text-green-600'}
+            `}>
+              <Upload className="h-8 w-8" />
+            </div>
+
+            <div className="text-center sm:text-left">
+              <h2 className="text-lg font-semibold text-gray-800">
+                {isDragging ? 'Drop Excel file here' : 'Upload Running Order Status'}
+              </h2>
+              <p className="text-sm text-gray-500 mt-1">
+                Drag & drop your Excel file here, or click to browse
+              </p>
+              <p className="text-xs text-gray-400 mt-1">
+                Supports .xlsx and .xls files
+              </p>
+            </div>
+
+            <Button
+              variant="default"
+              className="bg-green-600 hover:bg-green-700 shrink-0"
+              onClick={(e) => {
+                e.stopPropagation()
+                fileInputRef.current?.click()
+              }}
+            >
+              <FileSpreadsheet className="h-4 w-4 mr-2" />
+              Select File
+            </Button>
+          </div>
+
+          {/* New Orders Badge - Shows on upload zone if there are new orders */}
+          {!newOrdersLoading && newOrdersData && newOrdersData.orders.length > 0 && (
+            <div className="absolute -top-2 -right-2">
+              <Badge className="bg-amber-500 hover:bg-amber-500 text-white px-2 py-1">
+                <AlertCircle className="h-3 w-3 mr-1" />
+                {newOrdersData.orders.length} new order{newOrdersData.orders.length > 1 ? 's' : ''}
+              </Badge>
+            </div>
+          )}
+        </div>
+
+        {/* Quick Stats Row - Compact */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="bg-white rounded-lg border p-3 flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-blue-100 flex items-center justify-center">
+              <Package className="h-5 w-5 text-blue-600" />
+            </div>
+            <div>
+              <p className="text-2xl font-bold text-gray-800">{stats?.totalOrders || 0}</p>
+              <p className="text-xs text-gray-500">Orders</p>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-lg border p-3 flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-purple-100 flex items-center justify-center">
+              <span className="text-purple-600 font-bold text-sm">#</span>
+            </div>
+            <div>
+              <p className="text-2xl font-bold text-gray-800">
+                {stats?.totalPcs ? (stats.totalPcs > 1000 ? `${(stats.totalPcs / 1000).toFixed(1)}k` : stats.totalPcs) : 0}
+              </p>
+              <p className="text-xs text-gray-500">Total Pcs</p>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-lg border p-3 flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-red-100 flex items-center justify-center">
+              <AlertTriangle className="h-5 w-5 text-red-600" />
+            </div>
+            <div>
+              <p className="text-2xl font-bold text-red-600">{stats?.overdue || 0}</p>
+              <p className="text-xs text-gray-500">Overdue</p>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-lg border p-3 flex items-center gap-3">
+            <div className="w-10 h-10 rounded-lg bg-green-100 flex items-center justify-center">
+              <Calendar className="h-5 w-5 text-green-600" />
+            </div>
+            <div>
+              <p className="text-2xl font-bold text-green-600">{stats?.thisWeek || 0}</p>
+              <p className="text-xs text-gray-500">This Week</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Search and Filters Bar */}
+        <div className="bg-white rounded-lg border p-3">
+          <div className="flex flex-wrap items-center gap-2">
             {/* Search */}
-            <div className="relative w-64">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <div className="relative flex-1 min-w-[200px]">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
               <Input
                 placeholder="Search OPS, Buyer, Article..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="pl-10 h-9"
+                className="pl-10 h-9 bg-gray-50 border-gray-200"
               />
             </div>
 
-            {/* Filters Dropdown */}
+            {/* Filters */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" className="relative">
+                <Button variant="outline" size="sm" className="h-9 relative">
                   <Filter className="h-4 w-4 mr-1" />
                   Filters
                   {activeFilterCount > 0 && (
-                    <Badge
-                      variant="secondary"
-                      className="ml-1 h-5 w-5 p-0 flex items-center justify-center text-[10px] bg-primary text-primary-foreground"
-                    >
+                    <Badge className="ml-1 h-5 w-5 p-0 flex items-center justify-center text-[10px] bg-green-600">
                       {activeFilterCount}
                     </Badge>
                   )}
@@ -216,7 +380,6 @@ export function DashboardPage() {
                 <DropdownMenuLabel>Filter By</DropdownMenuLabel>
                 <DropdownMenuSeparator />
 
-                {/* Company Filter */}
                 <DropdownMenuLabel className="text-xs text-muted-foreground font-normal flex items-center gap-1">
                   <Building2 className="h-3 w-3" /> Company
                 </DropdownMenuLabel>
@@ -240,7 +403,6 @@ export function DashboardPage() {
                 </DropdownMenuCheckboxItem>
                 <DropdownMenuSeparator />
 
-                {/* Status Filters */}
                 <DropdownMenuLabel className="text-xs text-muted-foreground font-normal flex items-center gap-1">
                   <Clock className="h-3 w-3" /> Status
                 </DropdownMenuLabel>
@@ -260,7 +422,6 @@ export function DashboardPage() {
                 </DropdownMenuCheckboxItem>
                 <DropdownMenuSeparator />
 
-                {/* Clear Filters */}
                 {activeFilterCount > 0 && (
                   <div className="p-2">
                     <Button
@@ -277,13 +438,13 @@ export function DashboardPage() {
               </DropdownMenuContent>
             </DropdownMenu>
 
-            {/* Buyer Filter Dropdown */}
+            {/* Buyer Filter */}
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button
                   variant={filters.buyer ? 'default' : 'outline'}
                   size="sm"
-                  className="text-xs"
+                  className={`h-9 text-xs ${filters.buyer ? 'bg-green-600 hover:bg-green-700' : ''}`}
                 >
                   <User className="h-3 w-3 mr-1" />
                   {filters.buyer || 'Buyer'}
@@ -309,168 +470,55 @@ export function DashboardPage() {
               </DropdownMenuContent>
             </DropdownMenu>
 
-            {/* Upload Excel */}
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setShowExcelUpload(true)}
-            >
-              <Upload className="h-4 w-4 mr-1" />
-              Upload
-            </Button>
+            {/* Active Filter Pills */}
+            {activeFilterCount > 0 && (
+              <div className="flex items-center gap-1 ml-2">
+                {filters.company !== 'all' && (
+                  <Badge variant="secondary" className="text-xs cursor-pointer" onClick={() => setFilters((f) => ({ ...f, company: 'all' }))}>
+                    {filters.company} <X className="h-3 w-3 ml-1" />
+                  </Badge>
+                )}
+                {filters.overdue && (
+                  <Badge variant="destructive" className="text-xs cursor-pointer" onClick={() => setFilters((f) => ({ ...f, overdue: false }))}>
+                    Overdue <X className="h-3 w-3 ml-1" />
+                  </Badge>
+                )}
+                {filters.thisWeek && (
+                  <Badge className="text-xs bg-green-600 cursor-pointer" onClick={() => setFilters((f) => ({ ...f, thisWeek: false }))}>
+                    This Week <X className="h-3 w-3 ml-1" />
+                  </Badge>
+                )}
+              </div>
+            )}
 
-            {/* Refresh */}
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleRefresh}
-              disabled={isFetching}
-            >
-              <RefreshCw className={`h-4 w-4 mr-1 ${isFetching ? 'animate-spin' : ''}`} />
-              Refresh
-            </Button>
-
-            {/* Logout */}
-            <Button variant="ghost" size="sm" onClick={logout}>
-              <LogOut className="h-4 w-4 mr-1" />
-              Logout
-            </Button>
+            {/* Results count */}
+            <span className="text-xs text-gray-500 ml-auto">
+              {filteredRows.length} items
+            </span>
           </div>
         </div>
 
-        {/* Active Filters Bar */}
-        {activeFilterCount > 0 && (
-          <div className="px-4 pb-2 flex items-center gap-2 flex-wrap">
-            <span className="text-xs text-muted-foreground">Active filters:</span>
-            {filters.company !== 'all' && (
-              <Badge variant="secondary" className="text-xs">
-                {filters.company}
-                <X
-                  className="h-3 w-3 ml-1 cursor-pointer"
-                  onClick={() => setFilters((f) => ({ ...f, company: 'all' }))}
-                />
-              </Badge>
-            )}
-            {filters.buyer && (
-              <Badge variant="secondary" className="text-xs">
-                Buyer: {filters.buyer}
-                <X
-                  className="h-3 w-3 ml-1 cursor-pointer"
-                  onClick={() => setFilters((f) => ({ ...f, buyer: '' }))}
-                />
-              </Badge>
-            )}
-            {filters.merchant && (
-              <Badge variant="secondary" className="text-xs">
-                Merchant: {filters.merchant}
-                <X
-                  className="h-3 w-3 ml-1 cursor-pointer"
-                  onClick={() => setFilters((f) => ({ ...f, merchant: '' }))}
-                />
-              </Badge>
-            )}
-            {filters.overdue && (
-              <Badge variant="destructive" className="text-xs">
-                Overdue
-                <X
-                  className="h-3 w-3 ml-1 cursor-pointer"
-                  onClick={() => setFilters((f) => ({ ...f, overdue: false }))}
-                />
-              </Badge>
-            )}
-            {filters.thisWeek && (
-              <Badge variant="default" className="text-xs bg-green-600">
-                This Week
-                <X
-                  className="h-3 w-3 ml-1 cursor-pointer"
-                  onClick={() => setFilters((f) => ({ ...f, thisWeek: false }))}
-                />
-              </Badge>
-            )}
-            <span className="text-xs text-muted-foreground ml-2">
-              Showing {filteredRows.length} of {rows.length} items
-            </span>
-          </div>
-        )}
-      </header>
-
-      {/* Main Content */}
-      <main className="p-4 space-y-4">
-        {/* New Orders Alert */}
-        {!newOrdersLoading && newOrdersData && newOrdersData.orders.length > 0 && (
-          <Alert variant="warning" className="border-amber-300 bg-amber-50">
-            <AlertCircle className="h-5 w-5 text-amber-600" />
-            <AlertTitle className="text-amber-800 font-semibold">
-              {newOrdersData.orders.length} New Order{newOrdersData.orders.length > 1 ? 's' : ''} from Merchandising
-            </AlertTitle>
-            <AlertDescription className="text-amber-700">
-              <p className="mb-3 text-sm">
-                {newOrdersData.isFirstUpload
-                  ? 'These orders were created in the last 7 days. Upload an Excel to clear this alert.'
-                  : `Created since last Excel upload (${newOrdersData.lastUploadedAt ? formatDistanceToNow(new Date(newOrdersData.lastUploadedAt), { addSuffix: true }) : 'never'})`}
-              </p>
-              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                {newOrdersData.orders.slice(0, 9).map((order) => (
-                  <div
-                    key={order.id}
-                    className="flex items-center justify-between bg-white/80 rounded-lg px-3 py-2 border border-amber-200"
-                  >
-                    <div className="flex items-center gap-2">
-                      <Badge variant="outline" className="text-xs font-mono bg-white">
-                        {order.opsNo}
-                      </Badge>
-                      <span className="text-sm font-medium">{order.buyerCode}</span>
-                    </div>
-                    <div className="flex items-center gap-2 text-xs text-amber-700">
-                      <span>{order.totalPcs} pcs</span>
-                      <span className="text-amber-400">•</span>
-                      <span>{order.totalSqm?.toFixed(1)} sqm</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-              {newOrdersData.orders.length > 9 && (
-                <p className="mt-2 text-xs text-amber-600">
-                  +{newOrdersData.orders.length - 9} more new orders
-                </p>
-              )}
-              <p className="mt-3 text-xs text-amber-600 flex items-center gap-1">
-                <FileSpreadsheet className="h-3 w-3" />
-                Upload the latest Excel file to clear this alert
-              </p>
-            </AlertDescription>
-          </Alert>
-        )}
-
-        {/* Stats Cards - Compact */}
-        <StatsCards stats={stats} isLoading={!stats} />
-
         {/* Tabs for different views */}
         <Tabs defaultValue="orders" className="w-full">
-          <TabsList>
-            <TabsTrigger value="orders" className="gap-2">
+          <TabsList className="bg-white border">
+            <TabsTrigger value="orders" className="gap-2 data-[state=active]:bg-green-50 data-[state=active]:text-green-700">
               <Table className="h-4 w-4" />
               Order Status
-              {filteredRows.length !== rows.length && (
-                <Badge variant="secondary" className="text-[10px] ml-1">
-                  {filteredRows.length}
-                </Badge>
-              )}
             </TabsTrigger>
-            <TabsTrigger value="tna" className="gap-2">
+            <TabsTrigger value="tna" className="gap-2 data-[state=active]:bg-green-50 data-[state=active]:text-green-700">
               <Calendar className="h-4 w-4" />
               TNA Timeline
             </TabsTrigger>
           </TabsList>
 
-          <TabsContent value="orders">
-            <div className="bg-card rounded-lg border shadow-sm">
+          <TabsContent value="orders" className="mt-3">
+            <div className="bg-white rounded-lg border">
               <ProductionTable rows={filteredRows} isLoading={rowsLoading} />
             </div>
           </TabsContent>
 
-          <TabsContent value="tna">
-            <div className="bg-card rounded-lg border shadow-sm p-4">
+          <TabsContent value="tna" className="mt-3">
+            <div className="bg-white rounded-lg border p-4">
               <TnaView rows={filteredRows} isLoading={rowsLoading} />
             </div>
           </TabsContent>

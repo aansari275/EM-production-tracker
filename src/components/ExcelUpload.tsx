@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import * as XLSX from 'xlsx'
 import { useQueryClient } from '@tanstack/react-query'
 import {
@@ -10,7 +10,6 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Upload, FileSpreadsheet, AlertCircle, CheckCircle2, Loader2, X } from 'lucide-react'
 
@@ -47,19 +46,9 @@ export function ExcelUpload({ open, onOpenChange }: ExcelUploadProps) {
   const [uploadResult, setUploadResult] = useState<UploadResult | null>(null)
   const [parseError, setParseError] = useState<string | null>(null)
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const selectedFile = e.target.files?.[0]
-    if (!selectedFile) return
-
-    setFile(selectedFile)
-    setParseError(null)
-    setUploadResult(null)
-    parseExcelFile(selectedFile)
-  }
-
-  const parseExcelFile = async (file: File) => {
+  const parseExcelFile = async (fileToParse: File) => {
     try {
-      const data = await file.arrayBuffer()
+      const data = await fileToParse.arrayBuffer()
       const workbook = XLSX.read(data)
       const sheetName = workbook.SheetNames[0]
       const worksheet = workbook.Sheets[sheetName]
@@ -184,6 +173,34 @@ export function ExcelUpload({ open, onOpenChange }: ExcelUploadProps) {
     } finally {
       setIsUploading(false)
     }
+  }
+
+  // Listen for dropped files from the dashboard
+  useEffect(() => {
+    const handleDroppedFile = (e: CustomEvent<File>) => {
+      const droppedFile = e.detail
+      if (droppedFile) {
+        setFile(droppedFile)
+        setParseError(null)
+        setUploadResult(null)
+        parseExcelFile(droppedFile)
+      }
+    }
+
+    window.addEventListener('excel-file-dropped', handleDroppedFile as EventListener)
+    return () => {
+      window.removeEventListener('excel-file-dropped', handleDroppedFile as EventListener)
+    }
+  }, [])
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFile = e.target.files?.[0]
+    if (!selectedFile) return
+
+    setFile(selectedFile)
+    setParseError(null)
+    setUploadResult(null)
+    parseExcelFile(selectedFile)
   }
 
   const resetState = () => {
