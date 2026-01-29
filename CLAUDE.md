@@ -22,9 +22,22 @@ Excel-style production tracker for the Production Planning & Control (PPC) team.
 
 ### 1. Excel-Style Production Table
 - Item-level rows (one row per order item, like the Excel)
-- Columns: Handled, Buyer, Merchant, PO Date, Ex-Factory, OPS #, Article, Size, Color, Quality, Order Pcs, Status, Rcvd, To Rcvd, Bazar, Finish, Packed
+- **Column order (optimized for visibility):**
+  1. OPS # - Order number
+  2. Buyer - Buyer code
+  3. Article - EM Design name
+  4. Size - Dimensions
+  5. Pcs - Order quantity
+  6. **Status** (yellow) - Free text production status
+  7. **Rcvd** (green) - Bazar done qty (from RCVD PCS column in Excel)
+  8. **To Rcvd** (orange) - Bazar pending (from TO RCVD PCS column)
+  9. **Finish** (purple) - Under finishing (from U/FINISHING column)
+  10. Ex-Fact - Ex-factory date
+  11. Color - Color variant
+  12. Quality - Quality/construction
+  13. Co. - Company (EMPL/EHI)
 - Inline editing: Click any editable cell to update
-- Color-coded columns matching Excel (yellow for Status, green for Rcvd, etc.)
+- Color-coded production columns always visible (no horizontal scroll needed)
 - Visual separation between different OPS numbers
 
 ### 2. Search & Filters
@@ -36,11 +49,17 @@ Excel-style production tracker for the Production Planning & Control (PPC) team.
 
 ### 3. Excel Bulk Upload
 - Upload "Running Order Status" Excel for bulk status updates
-- **Only updates status fields** (does not add new items):
-  - Status (free text)
-  - Rcvd Pcs, Old Stock, Bazar Done, U/Finishing, Packed
+- **Only updates status fields** (does not add new items)
+- **Excel Column → Display Mapping:**
+  | Excel Column | Display | Field |
+  |-------------|---------|-------|
+  | Status | Status | status |
+  | RCVD PCS | Rcvd | bazarDone (Bazar Done qty) |
+  | TO RCVD PCS | To Rcvd | toRcvdPcs (Bazar Pending) |
+  | U/FINISHING | Finish | uFinishing |
 - Matches existing items by OPS # + Article + Size + Color
 - Preview before upload, shows results summary
+- Saves upload timestamp to clear New Orders alert
 
 ### 4. TNA Timeline View
 - Separate tab for visual TNA stage tracking
@@ -79,11 +98,10 @@ interface ProductionTrackerEntry {
   items: {
     [itemId: string]: {
       status: string            // Free text: "Running on loom & Cutoff- 15 Feb"
-      rcvdPcs: number
-      oldStock: number
-      bazarDone: number
-      uFinishing: number
-      packed: number
+      bazarDone: number         // Rcvd - from RCVD PCS (bazar done qty)
+      toRcvdPcs: number         // To Rcvd - from TO RCVD PCS (bazar pending)
+      oldStock: number          // Old stock pieces
+      uFinishing: number        // Finish - from U/FINISHING
       updatedAt: string
     }
   }
@@ -179,3 +197,10 @@ src/
 netlify/functions/
 └── api.mts                    # All API endpoints
 ```
+
+## Recent Changes (Jan 2025)
+- **New Orders Alert** - Amber alert at top of dashboard showing orders created by merchants since last Excel upload. Clears when new Excel is uploaded.
+- **Column Reorder** - Production status columns (Status, Rcvd, To Rcvd, Finish) now appear early in table for visibility without scrolling.
+- **Simplified Column Mapping** - Excel columns mapped directly: RCVD PCS → Rcvd, TO RCVD PCS → To Rcvd, U/FINISHING → Finish.
+- **Removed Order Summary Tab** - Replaced by New Orders alert which serves the same purpose.
+- **Fixed Table Layout** - Uses `table-fixed` CSS to ensure all columns fit on screen.
