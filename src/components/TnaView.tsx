@@ -1,10 +1,10 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import type { ProductionRow, TnaStage, StageStatus } from '@/types'
-import { TNA_STAGES, TNA_STAGE_LABELS } from '@/types'
-import { formatDateShort, cn, isOverdue as checkOverdue } from '@/lib/utils'
+import { TNA_STAGES, TNA_STAGE_LABELS, TNA_STAGE_SHORT_LABELS } from '@/types'
+import { formatDateShort, cn, isOverdue as checkOverdue, getScheduleStatus } from '@/lib/utils'
 import { useUpdateStage } from '@/hooks/useProductionTracker'
 import { useOrder } from '@/hooks/useOrders'
 import { TnaGanttTimeline } from './TnaGanttTimeline'
@@ -15,7 +15,10 @@ import {
   Circle,
   Clock,
   ChevronDown,
-  ChevronRight
+  ChevronRight,
+  CheckCircle2,
+  AlertTriangle,
+  XCircle
 } from 'lucide-react'
 
 interface TnaViewProps {
@@ -100,14 +103,14 @@ export function TnaView({ rows, isLoading }: TnaViewProps) {
                 className="p-4 bg-gray-50 cursor-pointer hover:bg-gray-100 transition-colors"
                 onClick={() => toggleOps(opsNo)}
               >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-4">
+                <div className="flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-4 min-w-0">
                     {isExpanded ? (
-                      <ChevronDown className="h-5 w-5 text-muted-foreground" />
+                      <ChevronDown className="h-5 w-5 text-muted-foreground flex-shrink-0" />
                     ) : (
-                      <ChevronRight className="h-5 w-5 text-muted-foreground" />
+                      <ChevronRight className="h-5 w-5 text-muted-foreground flex-shrink-0" />
                     )}
-                    <div>
+                    <div className="min-w-0">
                       <div className="flex items-center gap-2">
                         <span className="font-mono font-bold text-lg">{opsNo}</span>
                         <Badge variant={firstRow.companyCode === 'EMPL' ? 'default' : 'secondary'}>
@@ -119,7 +122,15 @@ export function TnaView({ rows, isLoading }: TnaViewProps) {
                       </div>
                     </div>
                   </div>
-                  <div className="text-right">
+
+                  {/* Compact Progress Bar (collapsed view) */}
+                  {!isExpanded && (
+                    <div className="hidden md:block flex-1 max-w-md px-4">
+                      <CompactProgressBar orderId={firstRow.orderId} />
+                    </div>
+                  )}
+
+                  <div className="text-right flex-shrink-0">
                     <div className="text-sm font-medium">Ex-Factory</div>
                     <div className={cn(
                       'font-bold',
@@ -349,6 +360,113 @@ function TnaTimelineVertical({
       <p className="mt-4 text-[10px] text-gray-400 italic text-center">
         Tap status circle to cycle: Pending → In Progress → Completed
       </p>
+    </div>
+  )
+}
+
+// Compact progress bar for collapsed view
+function CompactProgressBar({ orderId }: { orderId: string }) {
+  const { data: orderData, isLoading } = useOrder(orderId)
+
+  const progressData = useMemo(() => {
+    if (!orderData) return null
+
+    const stages = orderData.tracker?.stages
+    const tnaEntries = orderData.tna?.entries || []
+
+    // Count active stages (not N/A)
+    const activeStages = tnaEntries.length > 0
+      ? tnaEntries.filter(e => e.targetDate !== null)
+      : TNA_STAGES.map(s => ({ stage: s, targetDate: 'dummy' }))
+
+    // Count completed stages
+    const completedCount = activeStages.filter(
+      entry => stages?.[entry.stage as TnaStage]?.status === 'completed'
+    ).length
+
+    // Find current stage (first non-completed)
+    let currentStage: TnaStage | null = null
+    for (const entry of activeStages) {
+      const status = stages?.[entry.stage as TnaStage]?.status || 'pending'
+      if (status !== 'completed') {
+        currentStage = entry.stage as TnaStage
+        break
+      }
+    }
+
+    // If all completed, show dispatch
+    if (!currentStage && completedCount > 0) {
+      currentStage = 'dispatch'
+    }
+
+    const totalActive = activeStages.length || TNA_STAGES.length
+    const percent = Math.round((completedCount / totalActive) * 100)
+
+    // Get schedule status
+    const scheduleStatus = getScheduleStatus(stages, tnaEntries, new Date())
+
+    return {
+      percent,
+      completed: completedCount,
+      total: totalActive,
+      currentStage,
+      scheduleStatus
+    }
+  }, [orderData])
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center gap-2">
+        <div className="flex-1 h-2 bg-gray-200 rounded-full overflow-hidden">
+          <div className="h-full w-1/4 bg-gray-300 animate-pulse rounded-full" />
+        </div>
+      </div>
+    )
+  }
+
+  if (!progressData) return null
+
+  const { percent, completed, total, currentStage, scheduleStatus } = progressData
+
+  // Status icon and color
+  const getStatusIndicator = () => {
+    switch (scheduleStatus) {
+      case 'on_track':
+        return { icon: CheckCircle2, color: 'text-green-600', bgColor: 'bg-green-500' }
+      case 'at_risk':
+        return { icon: AlertTriangle, color: 'text-amber-600', bgColor: 'bg-amber-500' }
+      case 'behind':
+        return { icon: XCircle, color: 'text-red-600', bgColor: 'bg-red-500' }
+    }
+  }
+
+  const status = getStatusIndicator()
+  const StatusIcon = status.icon
+
+  return (
+    <div className="flex items-center gap-3">
+      {/* Progress bar */}
+      <div className="flex-1 min-w-0">
+        <div className="h-2 bg-gray-200 rounded-full overflow-hidden">
+          <div
+            className={cn('h-full rounded-full transition-all', status.bgColor)}
+            style={{ width: `${percent}%` }}
+          />
+        </div>
+      </div>
+
+      {/* Progress info */}
+      <div className="flex items-center gap-2 flex-shrink-0">
+        <StatusIcon className={cn('h-4 w-4', status.color)} />
+        <span className="text-xs font-medium text-gray-600">
+          {percent}%
+        </span>
+        {currentStage && (
+          <span className="text-xs text-gray-500 hidden lg:inline">
+            • {TNA_STAGE_SHORT_LABELS[currentStage]}
+          </span>
+        )}
+      </div>
     </div>
   )
 }
