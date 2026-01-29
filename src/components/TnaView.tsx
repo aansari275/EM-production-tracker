@@ -1,12 +1,13 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { Input } from '@/components/ui/input'
 import type { ProductionRow, TnaStage, StageStatus } from '@/types'
 import { TNA_STAGES, TNA_STAGE_LABELS } from '@/types'
-import { formatDateShort, cn } from '@/lib/utils'
+import { formatDateShort, cn, isOverdue as checkOverdue } from '@/lib/utils'
 import { useUpdateStage } from '@/hooks/useProductionTracker'
+import { useOrder } from '@/hooks/useOrders'
+import { TnaGanttTimeline } from './TnaGanttTimeline'
 import {
   Package,
   Loader2,
@@ -33,8 +34,23 @@ function groupByOps(rows: ProductionRow[]): Map<string, ProductionRow[]> {
   return grouped
 }
 
+// Custom hook for responsive design
+function useIsMobile() {
+  const [isMobile, setIsMobile] = useState(false)
+
+  useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth < 768)
+    checkMobile()
+    window.addEventListener('resize', checkMobile)
+    return () => window.removeEventListener('resize', checkMobile)
+  }, [])
+
+  return isMobile
+}
+
 export function TnaView({ rows, isLoading }: TnaViewProps) {
   const [expandedOps, setExpandedOps] = useState<Set<string>>(new Set())
+  const isMobile = useIsMobile()
 
   if (isLoading) {
     return (
@@ -107,7 +123,7 @@ export function TnaView({ rows, isLoading }: TnaViewProps) {
                     <div className="text-sm font-medium">Ex-Factory</div>
                     <div className={cn(
                       'font-bold',
-                      isOverdue(firstRow.exFactoryDate) && 'text-red-600'
+                      checkOverdue(firstRow.exFactoryDate) && 'text-red-600'
                     )}>
                       {formatDateShort(firstRow.exFactoryDate)}
                     </div>
@@ -118,7 +134,13 @@ export function TnaView({ rows, isLoading }: TnaViewProps) {
               {/* TNA Timeline (expanded) */}
               {isExpanded && (
                 <CardContent className="p-4 pt-0">
-                  <TnaTimeline orderId={firstRow.orderId} opsNo={opsNo} />
+                  <TnaTimelineWrapper
+                    orderId={firstRow.orderId}
+                    opsNo={opsNo}
+                    poDate={firstRow.poDate}
+                    exFactoryDate={firstRow.exFactoryDate}
+                    isMobile={isMobile}
+                  />
                 </CardContent>
               )}
             </Card>
@@ -129,30 +151,109 @@ export function TnaView({ rows, isLoading }: TnaViewProps) {
   )
 }
 
-// TNA Timeline component for a single order
-function TnaTimeline({ orderId, opsNo }: { orderId: string; opsNo: string }) {
+// Wrapper component that fetches order data and chooses Gantt or vertical view
+function TnaTimelineWrapper({
+  orderId,
+  opsNo,
+  poDate,
+  exFactoryDate,
+  isMobile
+}: {
+  orderId: string
+  opsNo: string
+  poDate: string
+  exFactoryDate: string
+  isMobile: boolean
+}) {
+  const { data: orderData, isLoading } = useOrder(orderId)
+
+  if (isLoading) {
+    return (
+      <div className="mt-4 border-t pt-4 flex items-center justify-center py-8">
+        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+        <span className="ml-2 text-sm text-muted-foreground">Loading timeline...</span>
+      </div>
+    )
+  }
+
+  // Use order confirmation date if available, otherwise fall back to poDate
+  const startDate = orderData?.orderConfirmationDate || poDate
+  const endDate = orderData?.shipDate || exFactoryDate
+
+  // Get tracker stages data
+  const stages = orderData?.tracker?.stages
+
+  // Get TNA entries from order
+  const tnaEntries = orderData?.tna?.entries
+
+  // On mobile, show vertical timeline for better usability
+  if (isMobile) {
+    return (
+      <TnaTimelineVertical
+        orderId={orderId}
+        opsNo={opsNo}
+        stages={stages}
+        tnaEntries={tnaEntries}
+      />
+    )
+  }
+
+  // Desktop: show Gantt timeline
+  return (
+    <TnaGanttTimeline
+      orderId={orderId}
+      opsNo={opsNo}
+      startDate={startDate}
+      endDate={endDate}
+      tnaEntries={tnaEntries}
+      stages={stages}
+    />
+  )
+}
+
+// Vertical timeline for mobile view (original design)
+function TnaTimelineVertical({
+  orderId,
+  opsNo,
+  stages,
+  tnaEntries
+}: {
+  orderId: string
+  opsNo: string
+  stages?: Record<TnaStage, { status: StageStatus; actualDate?: string | null }>
+  tnaEntries?: Array<{ stage: TnaStage; targetDate: string | null }>
+}) {
   const updateStage = useUpdateStage()
 
-  // For now, show all stages with pending status
-  // In real implementation, this would fetch from production_tracker collection
-  const stages = TNA_STAGES.map(stage => ({
-    stage,
-    label: TNA_STAGE_LABELS[stage],
-    status: 'pending' as StageStatus,
-    targetDate: null as string | null,
-    actualDate: null as string | null,
-    notes: ''
-  }))
+  // Build stage data
+  const stageData = TNA_STAGES.map(stage => {
+    const tnaEntry = tnaEntries?.find(e => e.stage === stage)
+    const stageUpdate = stages?.[stage]
 
-  const handleStatusChange = async (stage: TnaStage, newStatus: StageStatus) => {
+    return {
+      stage,
+      label: TNA_STAGE_LABELS[stage],
+      status: (stageUpdate?.status || 'pending') as StageStatus,
+      targetDate: tnaEntry?.targetDate || null,
+      actualDate: stageUpdate?.actualDate || null,
+      isNA: tnaEntry?.targetDate === null
+    }
+  })
+
+  const handleStatusChange = async (stage: TnaStage, currentStatus: StageStatus) => {
+    // Cycle through statuses: pending -> in_progress -> completed -> pending
+    const nextStatus: StageStatus =
+      currentStatus === 'pending' ? 'in_progress' :
+      currentStatus === 'in_progress' ? 'completed' : 'pending'
+
     try {
       await updateStage.mutateAsync({
         orderId,
         opsNo,
         stage,
         update: {
-          status: newStatus,
-          actualDate: newStatus === 'completed' ? new Date().toISOString().split('T')[0] : null
+          status: nextStatus,
+          actualDate: nextStatus === 'completed' ? new Date().toISOString().split('T')[0] : null
         }
       })
     } catch (error) {
@@ -168,32 +269,27 @@ function TnaTimeline({ orderId, opsNo }: { orderId: string; opsNo: string }) {
         <div className="absolute left-4 top-0 bottom-0 w-0.5 bg-gray-200" />
 
         <div className="space-y-4">
-          {stages.map((stageData, index) => (
-            <div key={stageData.stage} className="relative flex items-start gap-4 pl-10">
+          {stageData.map((data, index) => (
+            <div key={data.stage} className="relative flex items-start gap-4 pl-10">
               {/* Status indicator */}
               <div
                 className={cn(
                   'absolute left-2 w-5 h-5 rounded-full flex items-center justify-center',
                   'border-2 bg-white cursor-pointer transition-colors',
-                  stageData.status === 'completed' && 'bg-green-500 border-green-500',
-                  stageData.status === 'in_progress' && 'bg-amber-500 border-amber-500',
-                  stageData.status === 'pending' && 'border-gray-300 hover:border-gray-400'
+                  data.isNA && 'bg-gray-50 border-gray-200 cursor-default',
+                  !data.isNA && data.status === 'completed' && 'bg-green-500 border-green-500',
+                  !data.isNA && data.status === 'in_progress' && 'bg-amber-500 border-amber-500',
+                  !data.isNA && data.status === 'pending' && 'border-gray-300 hover:border-gray-400'
                 )}
-                onClick={() => {
-                  // Cycle through statuses: pending -> in_progress -> completed -> pending
-                  const nextStatus: StageStatus =
-                    stageData.status === 'pending' ? 'in_progress' :
-                    stageData.status === 'in_progress' ? 'completed' : 'pending'
-                  handleStatusChange(stageData.stage, nextStatus)
-                }}
+                onClick={() => !data.isNA && handleStatusChange(data.stage, data.status)}
               >
-                {stageData.status === 'completed' && (
+                {data.isNA ? (
+                  <span className="text-[8px] text-gray-400">N/A</span>
+                ) : data.status === 'completed' ? (
                   <Check className="h-3 w-3 text-white" />
-                )}
-                {stageData.status === 'in_progress' && (
+                ) : data.status === 'in_progress' ? (
                   <Clock className="h-3 w-3 text-white" />
-                )}
-                {stageData.status === 'pending' && (
+                ) : (
                   <Circle className="h-3 w-3 text-gray-300" />
                 )}
               </div>
@@ -207,37 +303,40 @@ function TnaTimeline({ orderId, opsNo }: { orderId: string; opsNo: string }) {
                     </span>
                     <span className={cn(
                       'text-sm font-medium',
-                      stageData.status === 'completed' && 'text-green-700',
-                      stageData.status === 'in_progress' && 'text-amber-700',
-                      stageData.status === 'pending' && 'text-gray-600'
+                      data.isNA && 'text-gray-400 italic',
+                      !data.isNA && data.status === 'completed' && 'text-green-700',
+                      !data.isNA && data.status === 'in_progress' && 'text-amber-700',
+                      !data.isNA && data.status === 'pending' && 'text-gray-600'
                     )}>
-                      {stageData.label}
+                      {data.label}
                     </span>
                   </div>
 
                   <div className="flex items-center gap-4 text-xs">
-                    {stageData.targetDate && (
+                    {data.targetDate && (
                       <div className="text-muted-foreground">
-                        Target: {formatDateShort(stageData.targetDate)}
+                        Target: {formatDateShort(data.targetDate)}
                       </div>
                     )}
-                    {stageData.actualDate && (
+                    {data.actualDate && (
                       <div className="text-green-600 font-medium">
-                        Done: {formatDateShort(stageData.actualDate)}
+                        Done: {formatDateShort(data.actualDate)}
                       </div>
                     )}
-                    <Badge
-                      variant="outline"
-                      className={cn(
-                        'text-[10px]',
-                        stageData.status === 'completed' && 'border-green-500 text-green-700 bg-green-50',
-                        stageData.status === 'in_progress' && 'border-amber-500 text-amber-700 bg-amber-50',
-                        stageData.status === 'pending' && 'border-gray-300 text-gray-500'
-                      )}
-                    >
-                      {stageData.status === 'completed' ? 'Done' :
-                       stageData.status === 'in_progress' ? 'In Progress' : 'Pending'}
-                    </Badge>
+                    {!data.isNA && (
+                      <Badge
+                        variant="outline"
+                        className={cn(
+                          'text-[10px]',
+                          data.status === 'completed' && 'border-green-500 text-green-700 bg-green-50',
+                          data.status === 'in_progress' && 'border-amber-500 text-amber-700 bg-amber-50',
+                          data.status === 'pending' && 'border-gray-300 text-gray-500'
+                        )}
+                      >
+                        {data.status === 'completed' ? 'Done' :
+                         data.status === 'in_progress' ? 'In Progress' : 'Pending'}
+                      </Badge>
+                    )}
                   </div>
                 </div>
               </div>
@@ -245,17 +344,11 @@ function TnaTimeline({ orderId, opsNo }: { orderId: string; opsNo: string }) {
           ))}
         </div>
       </div>
+
+      {/* Click hint */}
+      <p className="mt-4 text-[10px] text-gray-400 italic text-center">
+        Tap status circle to cycle: Pending → In Progress → Completed
+      </p>
     </div>
   )
-}
-
-// Helper to check if date is overdue
-function isOverdue(dateStr: string): boolean {
-  if (!dateStr) return false
-  try {
-    const date = new Date(dateStr)
-    return date < new Date()
-  } catch {
-    return false
-  }
 }
