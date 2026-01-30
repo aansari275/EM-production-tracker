@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useProductionRows, useDashboardStats, useNewOrders } from '@/hooks/useOrders'
+import { formatDistanceToNow } from 'date-fns'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -275,9 +276,15 @@ export function DashboardPage() {
               <p className="text-sm text-gray-500 mt-1">
                 Drag & drop your Excel file here, or click to browse
               </p>
-              <p className="text-xs text-gray-400 mt-1">
-                Supports .xlsx and .xls files
-              </p>
+              {newOrdersData?.lastUploadedAt ? (
+                <p className="text-xs text-green-600 mt-1 font-medium">
+                  Last updated: {formatDistanceToNow(new Date(newOrdersData.lastUploadedAt), { addSuffix: true })}
+                </p>
+              ) : (
+                <p className="text-xs text-gray-400 mt-1">
+                  No upload yet
+                </p>
+              )}
             </div>
 
             <Button
