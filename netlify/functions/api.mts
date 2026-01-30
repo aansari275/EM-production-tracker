@@ -411,7 +411,7 @@ export default async function handler(req: Request, context: Context): Promise<R
         .map((doc) => ({ id: doc.id, ...doc.data() }))
         .filter((o: any) => o.orderType !== 'samples')
 
-      // Build lookup: key = "opsNo|article|size|color" -> { orderId, itemId }
+      // Build lookup: key = "opsNo|article|size|color" -> { orderId, itemId, opsNo }
       const itemLookup = new Map<string, { orderId: string; itemId: string; opsNo: string }>()
 
       orders.forEach((order: any) => {
@@ -422,34 +422,29 @@ export default async function handler(req: Request, context: Context): Promise<R
           const size = (item.size || '').toLowerCase().trim()
           const color = (item.color || '').toLowerCase().trim()
 
-          // Create multiple lookup keys for flexible matching
           const key1 = `${opsNo.toLowerCase()}|${article}|${size}|${color}`
-          const key2 = `${opsNo.toLowerCase()}|${article}|${size}` // without color
-          const key3 = `${opsNo.toLowerCase()}|${article}` // without size and color
+          const key2 = `${opsNo.toLowerCase()}|${article}|${size}`
+          const key3 = `${opsNo.toLowerCase()}|${article}`
 
           itemLookup.set(key1, { orderId: order.id, itemId: item.id, opsNo })
-          if (!itemLookup.has(key2)) {
-            itemLookup.set(key2, { orderId: order.id, itemId: item.id, opsNo })
-          }
-          if (!itemLookup.has(key3)) {
-            itemLookup.set(key3, { orderId: order.id, itemId: item.id, opsNo })
-          }
+          if (!itemLookup.has(key2)) itemLookup.set(key2, { orderId: order.id, itemId: item.id, opsNo })
+          if (!itemLookup.has(key3)) itemLookup.set(key3, { orderId: order.id, itemId: item.id, opsNo })
         })
       })
 
       let matched = 0
-      let updated = 0
       let notFound = 0
       const errors: string[] = []
 
-      // Process each uploaded row
+      // Group updates by orderId for efficient batching
+      const updatesByOrder = new Map<string, { opsNo: string; items: Record<string, any> }>()
+
       for (const row of uploadedRows) {
         const opsNo = (row.opsNo || '').toLowerCase().trim()
         const article = (row.article || '').toLowerCase().trim()
         const size = (row.size || '').toLowerCase().trim()
         const color = (row.color || '').toLowerCase().trim()
 
-        // Try different lookup keys
         const key1 = `${opsNo}|${article}|${size}|${color}`
         const key2 = `${opsNo}|${article}|${size}`
         const key3 = `${opsNo}|${article}`
@@ -458,54 +453,51 @@ export default async function handler(req: Request, context: Context): Promise<R
 
         if (!match) {
           notFound++
-          if (notFound <= 10) {
-            errors.push(`Not found: ${row.opsNo} - ${row.article} (${row.size})`)
-          }
+          if (notFound <= 10) errors.push(`Not found: ${row.opsNo} - ${row.article} (${row.size})`)
           continue
         }
 
         matched++
 
-        // Update tracker with status fields only
-        const trackerRef = db.collection('production_tracker').doc(match.orderId)
-        const trackerDoc = await trackerRef.get()
-
-        const itemUpdate = {
+        // Group by orderId
+        if (!updatesByOrder.has(match.orderId)) {
+          updatesByOrder.set(match.orderId, { opsNo: match.opsNo, items: {} })
+        }
+        updatesByOrder.get(match.orderId)!.items[match.itemId] = {
+          id: match.itemId,
+          orderId: match.orderId,
           status: row.status || '',
-          bazarDone: row.bazarDone || 0,      // Rcvd (from RCVD PCS column)
-          toRcvdPcs: row.toRcvdPcs || 0,      // To Rcvd (from TO RCVD PCS column)
+          bazarDone: row.bazarDone || 0,
+          toRcvdPcs: row.toRcvdPcs || 0,
           oldStock: row.oldStock || 0,
-          uFinishing: row.uFinishing || 0,    // Finish
+          uFinishing: row.uFinishing || 0,
           updatedAt: now,
         }
+      }
 
-        try {
-          if (trackerDoc.exists) {
-            await trackerRef.update({
-              [`items.${match.itemId}`]: {
-                ...trackerDoc.data()?.items?.[match.itemId],
-                ...itemUpdate,
-              },
-              updatedAt: now,
-            })
-          } else {
-            await trackerRef.set({
-              opsNo: match.opsNo,
-              items: {
-                [match.itemId]: {
-                  id: match.itemId,
-                  orderId: match.orderId,
-                  ...itemUpdate,
-                },
-              },
-              createdAt: now,
-              updatedAt: now,
-            })
+      // Batch write all updates (500 per batch is Firestore limit)
+      let updated = 0
+      const orderIds = Array.from(updatesByOrder.keys())
+
+      for (let i = 0; i < orderIds.length; i += 400) {
+        const batch = db.batch()
+        const batchOrderIds = orderIds.slice(i, i + 400)
+
+        for (const orderId of batchOrderIds) {
+          const data = updatesByOrder.get(orderId)!
+          const trackerRef = db.collection('production_tracker').doc(orderId)
+
+          // Use set with merge to handle both create and update
+          const updateData: any = { updatedAt: now }
+          for (const [itemId, itemData] of Object.entries(data.items)) {
+            updateData[`items.${itemId}`] = itemData
+            updated++
           }
-          updated++
-        } catch (error) {
-          errors.push(`Failed to update: ${row.opsNo} - ${row.article}`)
+
+          batch.set(trackerRef, { opsNo: data.opsNo, createdAt: now, ...updateData }, { merge: true })
         }
+
+        await batch.commit()
       }
 
       return jsonResponse({
