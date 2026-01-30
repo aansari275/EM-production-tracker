@@ -693,29 +693,31 @@ export default async function handler(req: Request, context: Context): Promise<R
       return jsonResponse({ success: true, data: doc.data() })
     }
 
-    // PRODUCTION STATUS FILE: Save file metadata (marks upload timestamp for new orders tracking)
+    // PRODUCTION STATUS FILE: Save file metadata + OPS numbers from upload
     if (path === '/production-status/file' && method === 'POST') {
       const body = await req.json()
-      const { fileName, uploadedAt, uploadedBy } = body
+      const { fileName, uploadedAt, uploadedBy, opsNumbers } = body
 
       const docRef = db.collection('settings').doc('production_status_file')
       await docRef.set({
         fileName: fileName || 'Excel Upload',
         uploadedAt: uploadedAt || new Date().toISOString(),
         uploadedBy: uploadedBy || 'PPC Team',
+        opsNumbers: opsNumbers || [], // Store OPS numbers from uploaded Excel
       }, { merge: true })
 
       return jsonResponse({ success: true })
     }
 
-    // NEW ORDERS: Get orders created after last Excel upload
+    // NEW ORDERS: Get orders whose OPS# is NOT in the last uploaded Excel
     if (path === '/production-status/new-orders' && method === 'GET') {
       try {
-        // Get last upload timestamp
+        // Get OPS numbers from last upload
         const settingsDoc = await db.collection('settings').doc('production_status_file').get()
+        const uploadedOpsNumbers: string[] = settingsDoc.exists ? (settingsDoc.data()?.opsNumbers || []) : []
         const lastUploadedAt = settingsDoc.exists ? settingsDoc.data()?.uploadedAt : null
 
-        // Fetch all sent orders and filter in memory (more reliable than Firestore date queries)
+        // Fetch all sent orders
         const ordersRef = db.collection('orders').doc('data').collection('orders')
         const ordersSnapshot = await ordersRef.where('status', '==', 'sent').get()
 
@@ -723,23 +725,19 @@ export default async function handler(req: Request, context: Context): Promise<R
           .map((doc) => ({ id: doc.id, ...doc.data() }))
           .filter((o: any) => o.orderType !== 'samples')
 
-        // Filter by date in memory
-        if (lastUploadedAt) {
-          const lastUploadDate = new Date(lastUploadedAt)
+        // Create a Set of uploaded OPS numbers (normalized) for fast lookup
+        const uploadedOpsSet = new Set(uploadedOpsNumbers.map((ops: string) => ops.toLowerCase().trim()))
+
+        // Filter: only show orders whose OPS# is NOT in the uploaded Excel
+        if (uploadedOpsSet.size > 0) {
           orders = orders.filter((o: any) => {
-            if (!o.createdAt) return false
-            const orderDate = o.createdAt?.toDate ? o.createdAt.toDate() : new Date(o.createdAt)
-            return orderDate > lastUploadDate
+            const opsNo = formatOpsNo(o.salesNo).toLowerCase().trim()
+            return !uploadedOpsSet.has(opsNo)
           })
-        } else {
-          // No upload yet, show orders from last 7 days
-          const sevenDaysAgo = new Date()
-          sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7)
-          orders = orders.filter((o: any) => {
-            if (!o.createdAt) return false
-            const orderDate = o.createdAt?.toDate ? o.createdAt.toDate() : new Date(o.createdAt)
-            return orderDate >= sevenDaysAgo
-          })
+        }
+        // If no upload yet, show nothing (no badge) - wait for first upload
+        else {
+          orders = []
         }
 
         const formattedOrders = orders
@@ -760,7 +758,7 @@ export default async function handler(req: Request, context: Context): Promise<R
           data: {
             orders: formattedOrders,
             lastUploadedAt,
-            isFirstUpload: !lastUploadedAt,
+            isFirstUpload: uploadedOpsSet.size === 0,
           },
         })
       } catch (err) {

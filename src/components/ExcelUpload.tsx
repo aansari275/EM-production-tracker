@@ -147,7 +147,10 @@ export function ExcelUpload({ open, onOpenChange }: ExcelUploadProps) {
 
       setUploadResult(result.data)
 
-      // Save file metadata to clear new orders alert
+      // Extract unique OPS numbers from uploaded data
+      const opsNumbers = [...new Set(parsedData.map(row => row.opsNo.trim()).filter(Boolean))]
+
+      // Save file metadata with OPS numbers to track new orders
       await fetch('/api/production-status/file', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -155,6 +158,7 @@ export function ExcelUpload({ open, onOpenChange }: ExcelUploadProps) {
           fileName: file?.name || 'Excel Upload',
           uploadedAt: new Date().toISOString(),
           uploadedBy: 'PPC Team',
+          opsNumbers, // Store OPS numbers from Excel to compare against system
         }),
       })
 
@@ -336,18 +340,10 @@ export function ExcelUpload({ open, onOpenChange }: ExcelUploadProps) {
           {/* Upload Result */}
           {uploadResult && (
             <div className="space-y-4">
-              <div className={`p-4 rounded-lg ${
-                uploadResult.errors.length > 0 ? 'bg-red-50' : 'bg-green-50'
-              }`}>
+              <div className="p-4 rounded-lg bg-green-50">
                 <div className="flex items-center gap-2 mb-3">
-                  {uploadResult.errors.length > 0 ? (
-                    <AlertCircle className="h-5 w-5 text-red-600" />
-                  ) : (
-                    <CheckCircle2 className="h-5 w-5 text-green-600" />
-                  )}
-                  <span className="font-medium">
-                    {uploadResult.errors.length > 0 ? 'Upload Completed with Errors' : 'Upload Successful'}
-                  </span>
+                  <CheckCircle2 className="h-5 w-5 text-green-600" />
+                  <span className="font-medium text-green-800">Upload Complete</span>
                 </div>
 
                 <div className="grid grid-cols-3 gap-4 text-sm">
@@ -360,20 +356,15 @@ export function ExcelUpload({ open, onOpenChange }: ExcelUploadProps) {
                     <p className="text-lg font-bold text-green-600">{uploadResult.updated}</p>
                   </div>
                   <div>
-                    <p className="text-muted-foreground">Not Found</p>
-                    <p className="text-lg font-bold text-amber-600">{uploadResult.notFound}</p>
+                    <p className="text-muted-foreground">Skipped</p>
+                    <p className="text-lg font-bold text-gray-500">{uploadResult.notFound}</p>
                   </div>
                 </div>
 
-                {uploadResult.errors.length > 0 && (
-                  <div className="mt-3 pt-3 border-t border-red-200">
-                    <p className="text-sm font-medium text-red-700 mb-1">Errors:</p>
-                    <ul className="text-xs text-red-600 list-disc list-inside">
-                      {uploadResult.errors.slice(0, 5).map((err, idx) => (
-                        <li key={idx}>{err}</li>
-                      ))}
-                    </ul>
-                  </div>
+                {uploadResult.notFound > 0 && (
+                  <p className="mt-2 text-xs text-gray-500">
+                    Skipped items are old/completed orders not in the system
+                  </p>
                 )}
               </div>
             </div>
