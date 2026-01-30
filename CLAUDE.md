@@ -47,7 +47,14 @@ Excel-style production tracker for the Production Planning & Control (PPC) team.
 - **Status Filters**: Overdue Only / This Week Only
 - Active filters bar shows applied filters with clear buttons
 
-### 3. Excel Bulk Upload
+### 3. Central Upload Zone (Hero Feature)
+- **Large drag-and-drop area** at top of dashboard - impossible to miss
+- Drag & drop Excel file or click "Select File" button
+- Shows "Last updated: X minutes ago" timestamp
+- Pulsing badge shows new orders count (clickable for details)
+- Supports .xlsx and .xls files
+
+### 4. Excel Bulk Upload
 - Upload "Running Order Status" Excel for bulk status updates
 - **Only updates status fields** (does not add new items)
 - **Excel Column → Display Mapping:**
@@ -59,28 +66,31 @@ Excel-style production tracker for the Production Planning & Control (PPC) team.
   | U/FINISHING | Finish | uFinishing |
 - Matches existing items by OPS # + Article + Size + Color
 - Preview before upload, shows results summary
-- Saves upload timestamp to clear New Orders alert
+- Uses **batched Firestore writes** (400 per batch) for performance
+- Stores OPS numbers from Excel for new orders comparison
 
-### 4. TNA Timeline View
+### 5. TNA Timeline View
 - Separate tab for visual TNA stage tracking
 - Grouped by OPS number with expandable sections
 - 11-stage vertical timeline with status indicators
 - Click to update stage status
 
-### 5. Dashboard Stats
-- Total Orders, Total Items, Total Pcs
-- Overdue orders count
-- This Week's ex-factory
-- EMPL / EHI company breakdown
+### 6. Compact Stats Row
+- 4 key metrics: Orders, Total Pcs, Overdue, This Week
+- Clean horizontal layout below upload zone
 
-### 6. New Orders Alert
-- Amber alert at top of dashboard when PPC logs in
-- Shows orders created by merchants since the last Excel upload
-- Displays: OPS #, buyer code, pcs, sqm for each new order
-- Shows up to 9 orders in a grid, with count of remaining
-- Alert clears automatically when Excel is uploaded
-- If no upload has ever been made, shows orders from last 7 days
-- Data stored in: `settings/production_status_file` (uploadedAt timestamp)
+### 7. New Orders Detection
+- **Compares by OPS#** - Shows orders whose OPS# is NOT in uploaded Excel
+- Pulsing amber badge on upload zone: "X new orders - Click to view"
+- **Clickable modal** with full details:
+  - OPS # (large, highlighted)
+  - Company (EMPL/EHI)
+  - Buyer code & name
+  - Total pcs & sqm
+  - Created date
+- "Upload Updated Excel" button in modal
+- Clears when PPC adds orders to their Excel and re-uploads
+- Data stored in: `settings/production_status_file` (opsNumbers array + uploadedAt)
 
 ## Data Model
 
@@ -144,9 +154,9 @@ interface ProductionTrackerEntry {
 | `/api/production-tracker/:id/item/:itemId` | PUT | Update item status |
 | `/api/production-tracker/:id/stage/:stage` | PUT | Update TNA stage |
 | `/api/production-tracker/bulk-update` | POST | Bulk update from Excel |
-| `/api/production-status/file` | GET | Get last upload metadata |
-| `/api/production-status/file` | POST | Save upload timestamp (clears new orders alert) |
-| `/api/production-status/new-orders` | GET | Get orders created after last upload |
+| `/api/production-status/file` | GET | Get last upload metadata + OPS numbers |
+| `/api/production-status/file` | POST | Save upload metadata + OPS numbers from Excel |
+| `/api/production-status/new-orders` | GET | Get orders whose OPS# is NOT in uploaded Excel |
 
 ## Environment Variables
 ```bash
@@ -199,8 +209,17 @@ netlify/functions/
 ```
 
 ## Recent Changes (Jan 2025)
-- **New Orders Alert** - Amber alert at top of dashboard showing orders created by merchants since last Excel upload. Clears when new Excel is uploaded.
+
+### Jan 30, 2025 - Major UI Overhaul
+- **Central Upload Zone** - Large drag-and-drop hero section at top of dashboard. Upload button was hidden before, now impossible to miss.
+- **New Orders by OPS#** - Compares system orders against uploaded Excel OPS numbers (not timestamps). Shows only orders PPC doesn't have in their sheet.
+- **Clickable New Orders Badge** - Pulsing amber badge opens modal with full order details (OPS#, buyer, pcs, sqm, date).
+- **Last Updated Timestamp** - Shows "Last updated: X minutes ago" in upload zone.
+- **Batched Bulk Updates** - Uses Firestore batch writes (400/batch) to prevent timeout on large uploads.
+- **Simplified Stats** - Reduced from 6 cards to 4 compact stats (Orders, Pcs, Overdue, This Week).
+- **Friendlier Upload Results** - Changed "Errors" to "Skipped" for items not in system (old/completed orders).
+
+### Earlier (Jan 2025)
 - **Column Reorder** - Production status columns (Status, Rcvd, To Rcvd, Finish) now appear early in table for visibility without scrolling.
 - **Simplified Column Mapping** - Excel columns mapped directly: RCVD PCS → Rcvd, TO RCVD PCS → To Rcvd, U/FINISHING → Finish.
-- **Removed Order Summary Tab** - Replaced by New Orders alert which serves the same purpose.
 - **Fixed Table Layout** - Uses `table-fixed` CSS to ensure all columns fit on screen.
