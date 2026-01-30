@@ -718,24 +718,39 @@ export default async function handler(req: Request, context: Context): Promise<R
 
     // NEW ORDERS: Get orders created after last Excel upload
     if (path === '/production-status/new-orders' && method === 'GET') {
-      // Get last upload timestamp
-      const settingsDoc = await db.collection('settings').doc('production_status_file').get()
-      const lastUploadedAt = settingsDoc.exists ? settingsDoc.data()?.uploadedAt : null
+      try {
+        // Get last upload timestamp
+        const settingsDoc = await db.collection('settings').doc('production_status_file').get()
+        const lastUploadedAt = settingsDoc.exists ? settingsDoc.data()?.uploadedAt : null
 
-      if (!lastUploadedAt) {
-        // No upload yet, show all recent orders (last 7 days)
-        const sevenDaysAgo = new Date()
-        sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7)
-
+        // Fetch all sent orders and filter in memory (more reliable than Firestore date queries)
         const ordersRef = db.collection('orders').doc('data').collection('orders')
-        const ordersSnapshot = await ordersRef
-          .where('status', '==', 'sent')
-          .where('createdAt', '>=', sevenDaysAgo.toISOString())
-          .get()
+        const ordersSnapshot = await ordersRef.where('status', '==', 'sent').get()
 
-        const orders = ordersSnapshot.docs
+        let orders = ordersSnapshot.docs
           .map((doc) => ({ id: doc.id, ...doc.data() }))
           .filter((o: any) => o.orderType !== 'samples')
+
+        // Filter by date in memory
+        if (lastUploadedAt) {
+          const lastUploadDate = new Date(lastUploadedAt)
+          orders = orders.filter((o: any) => {
+            if (!o.createdAt) return false
+            const orderDate = o.createdAt?.toDate ? o.createdAt.toDate() : new Date(o.createdAt)
+            return orderDate > lastUploadDate
+          })
+        } else {
+          // No upload yet, show orders from last 7 days
+          const sevenDaysAgo = new Date()
+          sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7)
+          orders = orders.filter((o: any) => {
+            if (!o.createdAt) return false
+            const orderDate = o.createdAt?.toDate ? o.createdAt.toDate() : new Date(o.createdAt)
+            return orderDate >= sevenDaysAgo
+          })
+        }
+
+        const formattedOrders = orders
           .map((o: any) => ({
             id: o.id,
             opsNo: formatOpsNo(o.salesNo),
@@ -744,50 +759,22 @@ export default async function handler(req: Request, context: Context): Promise<R
             companyCode: o.companyCode,
             totalPcs: o.totalPcs || o.items?.reduce((sum: number, i: any) => sum + (i.pcs || 0), 0) || 0,
             totalSqm: o.totalSqm || o.items?.reduce((sum: number, i: any) => sum + (i.sqm || 0), 0) || 0,
-            createdAt: o.createdAt,
+            createdAt: o.createdAt?.toDate ? o.createdAt.toDate().toISOString() : o.createdAt,
           }))
           .sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
 
         return jsonResponse({
           success: true,
           data: {
-            orders,
-            lastUploadedAt: null,
-            isFirstUpload: true,
+            orders: formattedOrders,
+            lastUploadedAt,
+            isFirstUpload: !lastUploadedAt,
           },
         })
+      } catch (err) {
+        console.error('New orders error:', err)
+        return jsonResponse({ success: true, data: { orders: [], lastUploadedAt: null, isFirstUpload: true } })
       }
-
-      // Fetch orders created after last upload
-      const ordersRef = db.collection('orders').doc('data').collection('orders')
-      const ordersSnapshot = await ordersRef
-        .where('status', '==', 'sent')
-        .where('createdAt', '>', lastUploadedAt)
-        .get()
-
-      const orders = ordersSnapshot.docs
-        .map((doc) => ({ id: doc.id, ...doc.data() }))
-        .filter((o: any) => o.orderType !== 'samples')
-        .map((o: any) => ({
-          id: o.id,
-          opsNo: formatOpsNo(o.salesNo),
-          buyerCode: o.customerCode || o.buyerCode,
-          buyerName: o.buyerName,
-          companyCode: o.companyCode,
-          totalPcs: o.totalPcs || o.items?.reduce((sum: number, i: any) => sum + (i.pcs || 0), 0) || 0,
-          totalSqm: o.totalSqm || o.items?.reduce((sum: number, i: any) => sum + (i.sqm || 0), 0) || 0,
-          createdAt: o.createdAt,
-        }))
-        .sort((a: any, b: any) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
-
-      return jsonResponse({
-        success: true,
-        data: {
-          orders,
-          lastUploadedAt,
-          isFirstUpload: false,
-        },
-      })
     }
 
     // Not found
