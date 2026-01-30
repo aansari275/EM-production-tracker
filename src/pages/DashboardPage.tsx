@@ -1,11 +1,18 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useAuth } from '@/contexts/AuthContext'
 import { useProductionRows, useDashboardStats, useNewOrders } from '@/hooks/useOrders'
-import { formatDistanceToNow } from 'date-fns'
+import { formatDistanceToNow, format } from 'date-fns'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -52,6 +59,7 @@ export function DashboardPage() {
   const [debouncedSearch, setDebouncedSearch] = useState('')
   const debounceRef = useRef<NodeJS.Timeout>()
   const [showExcelUpload, setShowExcelUpload] = useState(false)
+  const [showNewOrders, setShowNewOrders] = useState(false)
   const [isDragging, setIsDragging] = useState(false)
   const dropZoneRef = useRef<HTMLDivElement>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -300,12 +308,18 @@ export function DashboardPage() {
             </Button>
           </div>
 
-          {/* New Orders Badge - Shows on upload zone if there are new orders */}
+          {/* New Orders Badge - Clickable to show details */}
           {!newOrdersLoading && newOrdersData && newOrdersData.orders.length > 0 && (
-            <div className="absolute -top-2 -right-2">
-              <Badge className="bg-amber-500 hover:bg-amber-500 text-white px-2 py-1">
-                <AlertCircle className="h-3 w-3 mr-1" />
-                {newOrdersData.orders.length} new order{newOrdersData.orders.length > 1 ? 's' : ''}
+            <div
+              className="absolute -top-2 -right-2 cursor-pointer"
+              onClick={(e) => {
+                e.stopPropagation()
+                setShowNewOrders(true)
+              }}
+            >
+              <Badge className="bg-amber-500 hover:bg-amber-600 text-white px-3 py-1.5 text-sm shadow-lg animate-pulse">
+                <AlertCircle className="h-4 w-4 mr-1" />
+                {newOrdersData.orders.length} new order{newOrdersData.orders.length > 1 ? 's' : ''} - Click to view
               </Badge>
             </div>
           )}
@@ -534,6 +548,81 @@ export function DashboardPage() {
 
       {/* Excel Upload Dialog */}
       <ExcelUpload open={showExcelUpload} onOpenChange={setShowExcelUpload} />
+
+      {/* New Orders Dialog */}
+      <Dialog open={showNewOrders} onOpenChange={setShowNewOrders}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-amber-600">
+              <AlertCircle className="h-5 w-5" />
+              {newOrdersData?.orders.length || 0} New Orders Found
+            </DialogTitle>
+            <DialogDescription>
+              These orders are in the system but NOT in your Excel sheet. Add them to your tracking sheet.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="flex-1 overflow-auto">
+            <div className="space-y-3">
+              {newOrdersData?.orders.map((order) => (
+                <div
+                  key={order.id}
+                  className="bg-amber-50 border border-amber-200 rounded-lg p-4"
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex-1">
+                      <div className="flex items-center gap-3 mb-2">
+                        <span className="text-lg font-bold text-amber-700 font-mono">
+                          {order.opsNo}
+                        </span>
+                        <Badge variant="outline" className="text-xs">
+                          {order.companyCode}
+                        </Badge>
+                      </div>
+                      <div className="text-sm text-gray-700">
+                        <span className="font-medium">{order.buyerCode}</span>
+                        <span className="text-gray-400 mx-2">•</span>
+                        <span>{order.buyerName}</span>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-lg font-bold text-gray-800">{order.totalPcs} pcs</p>
+                      <p className="text-sm text-gray-500">{order.totalSqm?.toFixed(1)} sqm</p>
+                    </div>
+                  </div>
+                  <div className="mt-2 pt-2 border-t border-amber-200 text-xs text-gray-500">
+                    Created: {order.createdAt ? format(new Date(order.createdAt), 'dd MMM yyyy, h:mm a') : 'Unknown'}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="pt-4 border-t bg-gray-50 -mx-6 -mb-6 px-6 py-4 mt-4">
+            <p className="text-sm text-gray-600 mb-3">
+              <strong>Action needed:</strong> Add these OPS numbers to your Running Order Status Excel and upload again.
+            </p>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                onClick={() => setShowNewOrders(false)}
+              >
+                Close
+              </Button>
+              <Button
+                className="bg-green-600 hover:bg-green-700"
+                onClick={() => {
+                  setShowNewOrders(false)
+                  fileInputRef.current?.click()
+                }}
+              >
+                <Upload className="h-4 w-4 mr-2" />
+                Upload Updated Excel
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
