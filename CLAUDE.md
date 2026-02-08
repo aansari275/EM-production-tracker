@@ -157,6 +157,53 @@ interface ProductionTrackerEntry {
 | `/api/production-status/file` | GET | Get last upload metadata + OPS numbers |
 | `/api/production-status/file` | POST | Save upload metadata + OPS numbers from Excel |
 | `/api/production-status/new-orders` | GET | Get orders whose OPS# is NOT in uploaded Excel |
+| `/api/wip` | GET | Live WIP from EMPL + EHI (filters: `company`, `buyer`, `search`) |
+
+## Live WIP Dashboard (Feb 2026)
+
+### Architecture
+- **EMPL**: Live queries to existing Neon PostgreSQL (`neondb`)
+- **EHI**: SQL Server (10.63.100.46 via ZeroTier) → synced every 30 min to Neon PostgreSQL (`ehi_wip`)
+- **Neon Project**: `quiet-lake-53645968` (both databases in same project)
+
+### EHI Sync Script
+- **File**: `scripts/sync-ehi.mjs`
+- Connects to EHI SQL Server, reads open orders + 333K carpets
+- Upserts into Neon PostgreSQL with transaction safety (BEGIN/COMMIT/ROLLBACK)
+- **LaunchAgent**: `~/Library/LaunchAgents/com.em.ehi-sync.plist` (every 30 min)
+- **Dependencies**: `mssql`, `pg`, `dotenv` (NOT in package.json — install separately)
+- **Env**: `scripts/.env` with `EHI_SQL_*` and `EHI_DATABASE_URL`
+- **Run manually**: `node scripts/sync-ehi.mjs`
+
+### WIP Stage Mapping (EHI)
+- **on_loom**: CurrentProStatus = 1 (WEAVING)
+- **finishing**: CurrentProStatus 2-6, 8-20, 23-24, 26, 28-37
+- **fg_godown**: CurrentProStatus 21 (AQL), 22 (MOVE TO WAREHOUSE)
+- **packed**: CurrentProStatus 7, 25, 27
+- **bazar_pcs**: Count of carpets with CurrentProStatus > 1 (passed through bazar)
+
+### Bazar in EHI
+Bazar is NOT a separate process. It's the PROCESS_RECEIVE_1 event (weaving receive).
+When a rug comes off the loom and is received from the weaver, that IS the bazar checkpoint.
+Tracked in: `PROCESS_RECEIVE_MASTER_1` / `PROCESS_RECEIVE_DETAIL_1` (1.1M records).
+
+### Key EHI SQL Server Tables
+| Table | Records | Purpose |
+|-------|---------|---------|
+| `OrderMaster` | Open: 521 | Orders (Status='0' = open) |
+| `OrderDetail` | ~2,912 | Order line items |
+| `CarpetNumber` | 4M total | Individual carpet tracking |
+| `Process_Stock_Detail` | 33.8M | Process flow history |
+| `PROCESS_NAME_MASTER` | 37 | Process definitions |
+| `ITEM_PARAMETER_MASTER` | - | Links Item_Finished_Id to design/size/color/quality |
+
+### EHI Column Name Gotchas
+- `OrderMaster.CustomerOrderNo` = OPS number (NOT OrderNo)
+- `OrderMaster.Status = '0'` = Open (NOT 'Active')
+- `OrderDetail.QtyRequired` (NOT Qty)
+- `OrderDetail.ArticalNo` (typo in EHI schema, NOT ArticleNo)
+- Design/Size/Color/Quality link via `ITEM_PARAMETER_MASTER.ITEM_FINISHED_ID`
+- CarpetNumber links via `Item_Finished_Id + OrderId` (NOT OrderDetailId)
 
 ## Environment Variables
 ```bash
@@ -167,6 +214,10 @@ FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY----
 
 # PPC Access
 PPC_ACCESS_PIN=ppc2024
+
+# WIP Databases (Netlify env vars)
+EMPL_DATABASE_URL=postgresql://...@neon.tech/neondb?sslmode=require
+EHI_DATABASE_URL=postgresql://...@neon.tech/ehi_wip?sslmode=require
 ```
 
 ## Local Development
@@ -192,10 +243,12 @@ src/
 │   └── ui/                    # shadcn/ui components
 ├── hooks/
 │   ├── useOrders.ts           # Fetch orders & production rows
+│   ├── useWIP.ts              # Live WIP React Query hook
 │   └── useProductionTracker.ts # Update mutations
 ├── pages/
 │   ├── LoginPage.tsx
-│   └── DashboardPage.tsx
+│   ├── DashboardPage.tsx
+│   └── WIPPage.tsx            # Live WIP dashboard
 ├── contexts/
 │   └── AuthContext.tsx
 ├── types/
