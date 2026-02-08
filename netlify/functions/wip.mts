@@ -156,8 +156,8 @@ async function queryEhiWIP(filters: {
 
   const sql = neon(dbUrl)
 
-  // EHI status '0' = Open orders
-  const conditions: string[] = ["o.status = '0'"]
+  // EHI status '0' = Open orders, only EM-style OPS numbers (skip legacy IKEA orders)
+  const conditions: string[] = ["o.status = '0'", "o.order_no LIKE 'EM-%'"]
 
   if (filters.buyer) {
     conditions.push(`o.buyer_code = '${filters.buyer.replace(/'/g, "''")}'`)
