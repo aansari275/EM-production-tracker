@@ -10,6 +10,11 @@
   autoLaunch = false
 
 [[redirects]]
+  from = "/api/wip"
+  to = "/.netlify/functions/wip"
+  status = 200
+
+[[redirects]]
   from = "/api/*"
   to = "/.netlify/functions/api/:splat"
   status = 200
@@ -21,7 +26,10 @@
 
 [functions]
   node_bundler = "esbuild"
-  external_node_modules = ["firebase-admin"]
+  external_node_modules = ["firebase-admin", "@neondatabase/serverless"]
 
 [functions."api"]
+  timeout = 30
+
+[functions."wip"]
   timeout = 30

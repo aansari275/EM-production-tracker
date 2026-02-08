@@ -226,3 +226,56 @@ export interface DashboardStats {
   overdue: number
   thisWeek: number
 }
+
+// ============== WIP (Work In Progress) Types ==============
+
+export interface WIPRow {
+  company: 'EMPL' | 'EHI'
+  opsNo: string
+  buyerCode: string
+  buyerName?: string
+  folioNo: string
+  contractor: string
+  design: string
+  size: string
+  color: string
+  quality: string
+  totalPcs: number
+  onLoom: number           // Currently being woven
+  bazarPcs: number         // Received from weaver (bazar stage)
+  finishingPcs: number     // In finishing pipeline
+  fgGodownPcs: number      // In finished goods godown
+  packedPcs: number        // Packed and ready
+  dispatchedPcs: number    // Already dispatched
+  // Order item identifiers for drill-down
+  orderId?: number
+  orderItemId?: number
+}
+
+export interface WIPSyncStatus {
+  empl: 'live'
+  ehi: {
+    status: 'synced' | 'stale' | 'error'
+    lastSyncedAt: string | null
+  }
+}
+
+export interface WIPResponse {
+  data: WIPRow[]
+  syncStatus: WIPSyncStatus
+  summary: WIPSummary
+}
+
+export interface WIPSummary {
+  totalOrders: number
+  totalPcs: number
+  onLoom: number
+  inBazar: number
+  inFinishing: number
+  packed: number
+  dispatched: number
+  byCompany: {
+    EMPL: { orders: number; pcs: number }
+    EHI: { orders: number; pcs: number }
+  }
+}

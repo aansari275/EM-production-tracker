@@ -24,6 +24,7 @@ import {
 import { ProductionTable } from '@/components/ProductionTable'
 import { TnaView } from '@/components/TnaView'
 import { ExcelUpload } from '@/components/ExcelUpload'
+import { WIPPage } from '@/pages/WIPPage'
 import {
   Factory,
   LogOut,
@@ -41,6 +42,7 @@ import {
   FileSpreadsheet,
   Package,
   AlertCircle,
+  Activity,
 } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 
@@ -526,6 +528,10 @@ export function DashboardPage() {
               <Table className="h-4 w-4" />
               Order Status
             </TabsTrigger>
+            <TabsTrigger value="wip" className="gap-2 data-[state=active]:bg-green-50 data-[state=active]:text-green-700">
+              <Activity className="h-4 w-4" />
+              Live WIP
+            </TabsTrigger>
             <TabsTrigger value="tna" className="gap-2 data-[state=active]:bg-green-50 data-[state=active]:text-green-700">
               <Calendar className="h-4 w-4" />
               TNA Timeline
@@ -536,6 +542,10 @@ export function DashboardPage() {
             <div className="bg-white rounded-lg border">
               <ProductionTable rows={filteredRows} isLoading={rowsLoading} />
             </div>
+          </TabsContent>
+
+          <TabsContent value="wip" className="mt-3">
+            <WIPPage />
           </TabsContent>
 
           <TabsContent value="tna" className="mt-3">
