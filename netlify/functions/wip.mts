@@ -51,7 +51,11 @@ async function queryEmplWIP(filters: {
   const sql = neon(dbUrl)
 
   // Build WHERE clause parts
-  const conditions: string[] = ["o.status IN ('active', 'open', 'Active', 'Open')"]
+  const conditions: string[] = [
+    "o.status IN ('active', 'open', 'Active', 'Open')",
+    // Filter to EM-25+ orders only (ops_number format: OPS-25xxx where 25=year)
+    "o.ops_number >= 'OPS-25000'"
+  ]
 
   if (filters.buyer) {
     conditions.push(`b.code = '${filters.buyer.replace(/'/g, "''")}'`)
@@ -157,7 +161,12 @@ async function queryEhiWIP(filters: {
   const sql = neon(dbUrl)
 
   // EHI status '0' = Open orders, only EM-style OPS numbers (skip legacy IKEA orders)
-  const conditions: string[] = ["o.status = '0'", "o.order_no LIKE 'EM-%'"]
+  const conditions: string[] = [
+    "o.status = '0'",
+    "o.order_no LIKE 'EM-%'",
+    // Filter to EM-25+ orders only (skip old EM-17, EM-18, etc.)
+    "o.order_no >= 'EM-25-'"
+  ]
 
   if (filters.buyer) {
     conditions.push(`o.buyer_code = '${filters.buyer.replace(/'/g, "''")}'`)
