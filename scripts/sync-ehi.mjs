@@ -5,6 +5,9 @@
  * Syncs WIP-relevant data from EHI's SQL Server (EMBH database)
  * to a Neon PostgreSQL database for the Production Tracker WIP view.
  *
+ * Prerequisites:
+ *   npm install mssql pg dotenv   (these are NOT in package.json — sync-only deps)
+ *
  * Usage:
  *   node scripts/sync-ehi.mjs               # Full sync
  *   node scripts/sync-ehi.mjs --init        # Create tables (first run)
