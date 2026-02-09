@@ -1,5 +1,21 @@
 import type { Context } from '@netlify/functions'
 import { neon } from '@neondatabase/serverless'
+import { initializeApp, getApps, cert } from 'firebase-admin/app'
+import { getFirestore } from 'firebase-admin/firestore'
+
+// Initialize Firebase Admin (for merchant lookup)
+if (!getApps().length) {
+  const privateKey = process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n')
+  initializeApp({
+    credential: cert({
+      projectId: process.env.FIREBASE_PROJECT_ID,
+      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+      privateKey,
+    }),
+  })
+}
+
+const db = getFirestore()
 
 // ============================================================================
 // WIP API — Live production data from EMPL + EHI Neon PostgreSQL databases
@@ -35,6 +51,41 @@ function jsonResponse(data: unknown, status = 200): Response {
     status,
     headers: { 'Content-Type': 'application/json' },
   })
+}
+
+// ============================================================================
+// Merchant lookup — maps buyer codes to merchant names (from Firestore)
+// ============================================================================
+
+let cachedMerchantMap: Map<string, string> | null = null
+let merchantMapExpiry = 0
+
+async function getMerchantMap(): Promise<Map<string, string>> {
+  // Cache for 10 minutes (serverless functions are short-lived anyway)
+  if (cachedMerchantMap && Date.now() < merchantMapExpiry) {
+    return cachedMerchantMap
+  }
+
+  const map = new Map<string, string>()
+  try {
+    const snap = await db.collection('merchants').get()
+    for (const doc of snap.docs) {
+      const data = doc.data()
+      const name = data.name || ''
+      const buyerCodes: string[] = data.assignedBuyerCodes || []
+      for (const code of buyerCodes) {
+        // If buyer has multiple merchants, keep the first one found
+        if (!map.has(code)) {
+          map.set(code, name)
+        }
+      }
+    }
+    cachedMerchantMap = map
+    merchantMapExpiry = Date.now() + 10 * 60 * 1000
+  } catch (err) {
+    console.warn('Failed to fetch merchants:', err)
+  }
+  return map
 }
 
 // ============================================================================
@@ -315,12 +366,25 @@ export default async function handler(req: Request, context: Context): Promise<R
 
     const filters = { buyer, search }
 
-    // Query both databases in parallel (skip if filtered to one company)
-    const [emplData, ehiData, ehiSyncStatus] = await Promise.all([
+    // Query both databases + merchant map in parallel
+    const [emplData, ehiData, ehiSyncStatus, merchantMap] = await Promise.all([
       company === 'EHI' ? [] : queryEmplWIP(filters),
       company === 'EMPL' ? [] : queryEhiWIP(filters),
       getEhiSyncStatus(),
+      getMerchantMap(),
     ])
+
+    // Fill in merchant names for EHI rows (and EMPL rows missing merchant)
+    for (const row of ehiData) {
+      if (!row.merchant && row.buyerCode) {
+        row.merchant = merchantMap.get(row.buyerCode) || ''
+      }
+    }
+    for (const row of emplData) {
+      if (!row.merchant && row.buyerCode) {
+        row.merchant = merchantMap.get(row.buyerCode) || ''
+      }
+    }
 
     const allData = [...emplData, ...ehiData]
 

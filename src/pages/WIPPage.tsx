@@ -524,7 +524,7 @@ function OpsDetailDialog({
 // Grouped WIP Table — one row per OPS
 // ============================================================================
 
-type SortKey = 'opsNo' | 'buyerCode' | 'merchant' | 'shipDate' | 'totalPcs' | 'itemCount' | 'bazarPcs' | 'packedPcs'
+type SortKey = 'opsNo' | 'buyerCode' | 'merchant' | 'orderDate' | 'shipDate' | 'totalPcs' | 'itemCount' | 'bazarPcs' | 'packedPcs'
 type SortDir = 'asc' | 'desc'
 
 function WIPTable({
@@ -560,6 +560,9 @@ function WIPTable({
           break
         case 'merchant':
           cmp = (a.merchant || '').localeCompare(b.merchant || '')
+          break
+        case 'orderDate':
+          cmp = (a.orderDate || '').localeCompare(b.orderDate || '')
           break
         case 'shipDate':
           cmp = (a.shipDate || '').localeCompare(b.shipDate || '')
@@ -623,6 +626,7 @@ function WIPTable({
             <SortHeader label="OPS #" field="opsNo" className="w-28" />
             <SortHeader label="Buyer" field="buyerCode" className="w-16" />
             <SortHeader label="Merchant" field="merchant" className="w-20" />
+            <SortHeader label="Rcvd" field="orderDate" className="w-20" />
             <SortHeader label="Ex-Fact" field="shipDate" className="w-20" />
             <SortHeader label="Items" field="itemCount" className="w-14 text-center" />
             <SortHeader label="Total" field="totalPcs" className="w-16 text-right" />
@@ -652,7 +656,10 @@ function WIPTable({
               <td className="px-2 py-2.5 text-xs text-gray-600 truncate max-w-[80px]" title={group.merchant}>
                 {group.merchant || '-'}
               </td>
-              <td className="px-2 py-2.5 text-xs text-gray-600">
+              <td className="px-2 py-2.5 text-xs text-gray-500">
+                {formatShortDate(group.orderDate)}
+              </td>
+              <td className="px-2 py-2.5 text-xs text-gray-600 font-medium">
                 {formatShortDate(group.shipDate)}
               </td>
               <td className="px-2 py-2.5 text-center">
