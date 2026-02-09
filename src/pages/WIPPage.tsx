@@ -502,19 +502,29 @@ function OpsDetailDialog({
           </table>
         </div>
 
-        {/* Folio/Contractor info if available */}
-        {group.items.some(i => i.folioNo || i.contractor) && (
-          <div className="mt-2 text-xs text-gray-400 space-y-0.5">
-            {group.items.filter(i => i.folioNo || i.contractor).map((item, idx) => (
-              <div key={idx}>
-                {item.design && <span className="text-gray-500">{item.design}: </span>}
-                {item.folioNo && `Folio ${item.folioNo}`}
-                {item.folioNo && item.contractor && ' | '}
-                {item.contractor && `Contractor: ${item.contractor}`}
-              </div>
-            ))}
-          </div>
-        )}
+        {/* Folio/Contractor info if available (deduplicated) */}
+        {group.items.some(i => i.folioNo || i.contractor) && (() => {
+          const seen = new Set<string>()
+          const unique = group.items.filter(i => {
+            if (!i.folioNo && !i.contractor) return false
+            const key = `${i.folioNo}|${i.contractor}`
+            if (seen.has(key)) return false
+            seen.add(key)
+            return true
+          })
+          if (unique.length === 0) return null
+          return (
+            <div className="mt-2 text-xs text-gray-400 space-y-0.5">
+              {unique.map((item, idx) => (
+                <div key={idx}>
+                  {item.folioNo && `Folio ${item.folioNo}`}
+                  {item.folioNo && item.contractor && ' | '}
+                  {item.contractor && `Contractor: ${item.contractor}`}
+                </div>
+              ))}
+            </div>
+          )
+        })()}
       </DialogContent>
     </Dialog>
   )
