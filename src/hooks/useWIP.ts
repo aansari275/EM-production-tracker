@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import type { WIPResponse, WIPRow, WIPSummary, WIPSyncStatus } from '@/types'
+import type { WIPResponse, WIPRow, WIPGroupedRow, WIPSummary, WIPSyncStatus } from '@/types'
 
 interface UseWIPOptions {
   company?: 'EMPL' | 'EHI' | 'all'
@@ -56,4 +56,4 @@ export function useWIP(options: UseWIPOptions = {}) {
 }
 
 // Export types for convenience
-export type { WIPRow, WIPSummary, WIPSyncStatus }
+export type { WIPRow, WIPGroupedRow, WIPSummary, WIPSyncStatus }

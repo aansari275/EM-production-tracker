@@ -197,6 +197,12 @@ Tracked in: `PROCESS_RECEIVE_MASTER_1` / `PROCESS_RECEIVE_DETAIL_1` (1.1M record
 | `PROCESS_NAME_MASTER` | 37 | Process definitions |
 | `ITEM_PARAMETER_MASTER` | - | Links Item_Finished_Id to design/size/color/quality |
 
+### EMPL Column Mapping (Neon PostgreSQL `neondb`)
+- `orders.order_number` = EM OPS number (`EM-25-1132`) — **this is the correct OPS**
+- `orders.ops_number` = Buyer's PO reference (`ORF24-1414`) — **NOT the EM OPS**
+- Filter: `o.order_number LIKE 'EM-25-%' OR o.order_number LIKE 'EM-26-%'`
+- Status filter: `o.status IN ('active', 'open', 'Active', 'Open')`
+
 ### EHI Column Name Gotchas
 - `OrderMaster.CustomerOrderNo` = OPS number (NOT OrderNo)
 - `OrderMaster.Status = '0'` = Open (NOT 'Active')
@@ -258,8 +264,32 @@ src/
     └── utils.ts
 
 netlify/functions/
-└── api.mts                    # All API endpoints
+├── api.mts                    # All API endpoints
+└── wip.mts                    # Live WIP from EMPL + EHI databases (30s timeout)
 ```
+
+## Recent Changes (Feb 2026)
+
+### Feb 8, 2026 - WIP: Fix EMPL OPS mapping + Grouped view + Open/All filter
+- **EMPL OPS Fix** - EMPL was showing buyer PO refs (`ORF24-1414`) instead of EM OPS numbers (`EM-25-1132`). Root cause: query used `COALESCE(o.ops_number, o.order_number)` but `ops_number` = buyer PO, `order_number` = EM OPS. Fixed to use `o.order_number as ops_no` directly.
+- **EMPL Filter Fix** - Changed filter from `o.ops_number >= 'OPS-25000'` to `(o.order_number LIKE 'EM-25-%' OR o.order_number LIKE 'EM-26-%')`. Cuts EMPL from ~5,800 rows to ~1,200 (only relevant EM-25/EM-26 orders).
+- **Collapsed One-Row-Per-OPS** - WIP table now shows one row per OPS (grouped from line items). Columns: Co., OPS #, Buyer, Items, Total, Loom, Bazar, Finish, Packed, Progress. All stage counts are sums across line items.
+- **OPS Detail Dialog** - Click any row to open a Dialog showing all line items for that OPS. Shows: header with OPS + Company badge + Buyer, summary badges for stage counts, full line-item table with Design/Size/Color/Quality/stages/progress bar, totals row, folio/contractor info.
+- **Open/All Filter** - Default view shows only open OPS from the production Excel (442 entries) + any new orders created after the Excel (sequence > max). Toggle "All" to see everything including dispatched/old orders.
+  - OPS list stored in Firestore `settings/production_status_file.opsNumbers`
+  - Fetched client-side, filtered after grouping
+  - To update: run `node scripts/upload-open-ops.mjs <excel-file>` or upload via the existing Excel upload in the production tracker
+- **New type: `WIPGroupedRow`** - Added to `src/types/index.ts`. Groups WIPRow items by OPS with aggregated counts.
+- **Export unchanged** - CSV export still exports at line-item level for full detail.
+
+### Open OPS Upload Script
+```bash
+# Upload open OPS numbers from production Excel
+node scripts/upload-open-ops.mjs "/path/to/Order Status.xlsx"
+```
+- Auto-detects OPS column (scans for `EM-25-xxx` / `EM-26-xxx` pattern)
+- Stores in Firestore `settings/production_status_file`
+- WIP page auto-picks up new list (30 min cache)
 
 ## Recent Changes (Jan 2025)
 

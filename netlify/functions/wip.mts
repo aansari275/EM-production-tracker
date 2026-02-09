@@ -53,8 +53,8 @@ async function queryEmplWIP(filters: {
   // Build WHERE clause parts
   const conditions: string[] = [
     "o.status IN ('active', 'open', 'Active', 'Open')",
-    // Filter to EM-25+ orders only (ops_number format: OPS-25xxx where 25=year)
-    "o.ops_number >= 'OPS-25000'"
+    // Filter to EM-25/EM-26 orders only (order_number = EM OPS number)
+    "(o.order_number LIKE 'EM-25-%' OR o.order_number LIKE 'EM-26-%')"
   ]
 
   if (filters.buyer) {
@@ -65,7 +65,6 @@ async function queryEmplWIP(filters: {
     const s = filters.search.replace(/'/g, "''").toLowerCase()
     conditions.push(`(
       LOWER(o.order_number) LIKE '%${s}%' OR
-      LOWER(o.ops_number) LIKE '%${s}%' OR
       LOWER(b.code) LIKE '%${s}%' OR
       LOWER(b.name) LIKE '%${s}%' OR
       LOWER(d.name) LIKE '%${s}%'
@@ -78,7 +77,7 @@ async function queryEmplWIP(filters: {
     const rows = await sql`
       SELECT
         'EMPL' as company,
-        COALESCE(o.ops_number, o.order_number) as ops_no,
+        o.order_number as ops_no,
         COALESCE(b.code, '') as buyer_code,
         COALESCE(b.name, '') as buyer_name,
         COALESCE(f.folio_number, '') as folio_no,
@@ -109,12 +108,12 @@ async function queryEmplWIP(filters: {
       LEFT JOIN contractors ct ON ct.id = f.contractor_id
       WHERE ${sql.unsafe(whereClause)}
       GROUP BY
-        o.id, o.ops_number, o.order_number,
+        o.id, o.order_number,
         b.code, b.name,
         f.folio_number, ct.name,
         d.name, s.label, col.name, q.name,
         oi.ordered_qty, oi.id
-      ORDER BY o.ops_number, oi.id
+      ORDER BY o.order_number, oi.id
     `
 
     return rows.map((row: any) => ({

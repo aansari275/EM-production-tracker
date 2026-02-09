@@ -252,6 +252,23 @@ export interface WIPRow {
   orderItemId?: number
 }
 
+// Grouped row — one per OPS (aggregated from WIPRow items)
+export interface WIPGroupedRow {
+  company: 'EMPL' | 'EHI'
+  opsNo: string
+  buyerCode: string
+  buyerName: string
+  itemCount: number
+  totalPcs: number
+  onLoom: number
+  bazarPcs: number
+  finishingPcs: number
+  fgGodownPcs: number
+  packedPcs: number
+  dispatchedPcs: number
+  items: WIPRow[]
+}
+
 export interface WIPSyncStatus {
   empl: 'live'
   ehi: {
