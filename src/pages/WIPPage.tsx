@@ -41,7 +41,21 @@ import {
   Eye,
   EyeOff,
 } from 'lucide-react'
-import { formatDistanceToNow } from 'date-fns'
+import { formatDistanceToNow, format, parseISO } from 'date-fns'
+
+// ============================================================================
+// Date formatting helper
+// ============================================================================
+
+function formatShortDate(dateStr: string | null): string {
+  if (!dateStr) return '-'
+  try {
+    const d = parseISO(dateStr)
+    return format(d, 'dd MMM')  // e.g. "13 Jan"
+  } catch {
+    return dateStr
+  }
+}
 
 // ============================================================================
 // Group rows by OPS number
@@ -70,6 +84,9 @@ function groupByOps(rows: WIPRow[]): WIPGroupedRow[] {
         opsNo: row.opsNo,
         buyerCode: row.buyerCode,
         buyerName: row.buyerName || '',
+        merchant: row.merchant || '',
+        orderDate: row.orderDate || null,
+        shipDate: row.shipDate || null,
         itemCount: 1,
         totalPcs: row.totalPcs,
         onLoom: row.onLoom,
@@ -364,12 +381,17 @@ function OpsDetailDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-4xl max-h-[85vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-3">
+          <DialogTitle className="flex items-center gap-3 flex-wrap">
             <span className="font-mono text-lg">{group.opsNo}</span>
             <CompanyBadge company={group.company} />
             <span className="text-gray-500 font-normal text-sm">
               {group.buyerCode}{group.buyerName ? ` - ${group.buyerName}` : ''}
             </span>
+            {group.merchant && (
+              <span className="text-gray-400 font-normal text-xs">
+                Merchant: {group.merchant}
+              </span>
+            )}
           </DialogTitle>
           <DialogDescription className="sr-only">
             Line item details for OPS {group.opsNo}
@@ -381,6 +403,16 @@ function OpsDetailDialog({
           <Badge variant="outline" className="text-xs font-bold">
             {group.itemCount} item{group.itemCount > 1 ? 's' : ''} &middot; {group.totalPcs} pcs
           </Badge>
+          {group.orderDate && (
+            <Badge variant="outline" className="text-xs text-gray-600">
+              Order: {formatShortDate(group.orderDate)}
+            </Badge>
+          )}
+          {group.shipDate && (
+            <Badge variant="outline" className="text-xs text-red-600 border-red-200">
+              Ex-Fact: {formatShortDate(group.shipDate)}
+            </Badge>
+          )}
           {stages.map((s) =>
             s.count > 0 ? (
               <Badge
@@ -492,7 +524,7 @@ function OpsDetailDialog({
 // Grouped WIP Table — one row per OPS
 // ============================================================================
 
-type SortKey = 'opsNo' | 'buyerCode' | 'totalPcs' | 'itemCount' | 'bazarPcs' | 'packedPcs'
+type SortKey = 'opsNo' | 'buyerCode' | 'merchant' | 'shipDate' | 'totalPcs' | 'itemCount' | 'bazarPcs' | 'packedPcs'
 type SortDir = 'asc' | 'desc'
 
 function WIPTable({
@@ -525,6 +557,12 @@ function WIPTable({
           break
         case 'buyerCode':
           cmp = a.buyerCode.localeCompare(b.buyerCode)
+          break
+        case 'merchant':
+          cmp = (a.merchant || '').localeCompare(b.merchant || '')
+          break
+        case 'shipDate':
+          cmp = (a.shipDate || '').localeCompare(b.shipDate || '')
           break
         case 'totalPcs':
           cmp = a.totalPcs - b.totalPcs
@@ -584,13 +622,15 @@ function WIPTable({
             <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 w-12">Co.</th>
             <SortHeader label="OPS #" field="opsNo" className="w-28" />
             <SortHeader label="Buyer" field="buyerCode" className="w-16" />
+            <SortHeader label="Merchant" field="merchant" className="w-20" />
+            <SortHeader label="Ex-Fact" field="shipDate" className="w-20" />
             <SortHeader label="Items" field="itemCount" className="w-14 text-center" />
             <SortHeader label="Total" field="totalPcs" className="w-16 text-right" />
             <th className="px-2 py-2 text-left text-xs font-medium text-amber-600 w-14">Loom</th>
             <SortHeader label="Bazar" field="bazarPcs" className="w-14" />
             <th className="px-2 py-2 text-left text-xs font-medium text-orange-600 w-14">Finish</th>
             <SortHeader label="Packed" field="packedPcs" className="w-14" />
-            <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 min-w-[140px]">Progress</th>
+            <th className="px-2 py-2 text-left text-xs font-medium text-gray-500 min-w-[120px]">Progress</th>
           </tr>
         </thead>
         <tbody>
@@ -608,6 +648,12 @@ function WIPTable({
               </td>
               <td className="px-2 py-2.5 text-xs font-medium text-gray-700">
                 {group.buyerCode}
+              </td>
+              <td className="px-2 py-2.5 text-xs text-gray-600 truncate max-w-[80px]" title={group.merchant}>
+                {group.merchant || '-'}
+              </td>
+              <td className="px-2 py-2.5 text-xs text-gray-600">
+                {formatShortDate(group.shipDate)}
               </td>
               <td className="px-2 py-2.5 text-center">
                 <span className="inline-flex items-center justify-center min-w-[20px] px-1.5 py-0.5 text-[10px] font-bold rounded-full bg-gray-100 text-gray-600">
@@ -653,9 +699,10 @@ function WIPTable({
 // ============================================================================
 
 function exportToExcel(rows: WIPRow[]) {
-  const headers = ['Company', 'OPS #', 'Buyer', 'Design', 'Size', 'Color', 'Quality', 'Total', 'On Loom', 'Bazar', 'Finishing', 'FG Godown', 'Packed', 'Dispatched', 'Folio', 'Contractor']
+  const headers = ['Company', 'OPS #', 'Buyer', 'Merchant', 'Order Date', 'Ex-Factory', 'Design', 'Size', 'Color', 'Quality', 'Total', 'On Loom', 'Bazar', 'Finishing', 'FG Godown', 'Packed', 'Dispatched', 'Folio', 'Contractor']
   const csvRows = rows.map((r) => [
-    r.company, r.opsNo, r.buyerCode, r.design, r.size, r.color, r.quality,
+    r.company, r.opsNo, r.buyerCode, r.merchant, r.orderDate || '', r.shipDate || '',
+    r.design, r.size, r.color, r.quality,
     r.totalPcs, r.onLoom, r.bazarPcs, r.finishingPcs, r.fgGodownPcs, r.packedPcs, r.dispatchedPcs,
     r.folioNo, r.contractor,
   ].map((v) => `"${String(v || '').replace(/"/g, '""')}"`).join(','))

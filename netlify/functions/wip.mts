@@ -10,6 +10,9 @@ interface WIPRow {
   opsNo: string
   buyerCode: string
   buyerName: string
+  merchant: string
+  orderDate: string | null
+  shipDate: string | null
   folioNo: string
   contractor: string
   design: string
@@ -80,6 +83,9 @@ async function queryEmplWIP(filters: {
         o.order_number as ops_no,
         COALESCE(b.code, '') as buyer_code,
         COALESCE(b.name, '') as buyer_name,
+        COALESCE(i.name, '') as merchant,
+        o.order_date,
+        COALESCE(o.ship_date, o.ex_factory_date) as ship_date,
         COALESCE(f.folio_number, '') as folio_no,
         COALESCE(ct.name, '') as contractor,
         COALESCE(d.name, '') as design,
@@ -99,6 +105,7 @@ async function queryEmplWIP(filters: {
       FROM orders o
       JOIN order_items oi ON oi.order_id = o.id
       LEFT JOIN buyers b ON b.id = o.buyer_id
+      LEFT JOIN incharges i ON i.id = o.incharge_id
       LEFT JOIN qualities q ON q.id = oi.quality_id
       LEFT JOIN designs d ON d.id = oi.design_id
       LEFT JOIN colours col ON col.id = oi.colour_id
@@ -108,8 +115,8 @@ async function queryEmplWIP(filters: {
       LEFT JOIN contractors ct ON ct.id = f.contractor_id
       WHERE ${sql.unsafe(whereClause)}
       GROUP BY
-        o.id, o.order_number,
-        b.code, b.name,
+        o.id, o.order_number, o.order_date, o.ship_date, o.ex_factory_date,
+        b.code, b.name, i.name,
         f.folio_number, ct.name,
         d.name, s.label, col.name, q.name,
         oi.ordered_qty, oi.id
@@ -121,6 +128,9 @@ async function queryEmplWIP(filters: {
       opsNo: row.ops_no || '',
       buyerCode: row.buyer_code || '',
       buyerName: row.buyer_name || '',
+      merchant: row.merchant || '',
+      orderDate: row.order_date || null,
+      shipDate: row.ship_date || null,
       folioNo: row.folio_no || '',
       contractor: row.contractor || '',
       design: row.design || '',
@@ -190,6 +200,9 @@ async function queryEhiWIP(filters: {
         o.order_no as ops_no,
         COALESCE(o.buyer_code, '') as buyer_code,
         '' as buyer_name,
+        '' as merchant,
+        o.order_date,
+        o.dispatch_date as ship_date,
         '' as folio_no,
         '' as contractor,
         COALESCE(oi.design_name, '') as design,
@@ -214,7 +227,7 @@ async function queryEhiWIP(filters: {
       LEFT JOIN ehi_carpets c ON c.order_item_id = oi.id
       WHERE ${sql.unsafe(whereClause)}
       GROUP BY
-        o.id, o.order_no, o.buyer_code,
+        o.id, o.order_no, o.buyer_code, o.order_date, o.dispatch_date,
         oi.design_name, oi.size, oi.color, oi.quality,
         oi.ordered_qty, oi.id
       ORDER BY o.order_no, oi.id
@@ -225,6 +238,9 @@ async function queryEhiWIP(filters: {
       opsNo: row.ops_no || '',
       buyerCode: row.buyer_code || '',
       buyerName: row.buyer_name || '',
+      merchant: row.merchant || '',
+      orderDate: row.order_date || null,
+      shipDate: row.ship_date || null,
       folioNo: row.folio_no || '',
       contractor: row.contractor || '',
       design: row.design || '',

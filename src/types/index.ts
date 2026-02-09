@@ -234,6 +234,9 @@ export interface WIPRow {
   opsNo: string
   buyerCode: string
   buyerName?: string
+  merchant: string
+  orderDate: string | null
+  shipDate: string | null
   folioNo: string
   contractor: string
   design: string
@@ -258,6 +261,9 @@ export interface WIPGroupedRow {
   opsNo: string
   buyerCode: string
   buyerName: string
+  merchant: string
+  orderDate: string | null
+  shipDate: string | null
   itemCount: number
   totalPcs: number
   onLoom: number
