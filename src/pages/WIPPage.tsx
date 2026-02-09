@@ -805,9 +805,6 @@ export function WIPPage() {
 
   return (
     <div className="space-y-4">
-      {/* Summary Cards */}
-      {summary && <SummaryCards summary={summary} />}
-
       {/* Filters Bar */}
       <div className="bg-white rounded-lg border p-3">
         <div className="flex flex-wrap items-center gap-2">
