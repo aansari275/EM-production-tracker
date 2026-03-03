@@ -1,76 +1,85 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react'
+import { onAuthStateChanged, signInWithPopup, signOut, User } from 'firebase/auth'
+import { auth, googleProvider } from '@/lib/firebase'
+
+interface AuthUser {
+  uid: string
+  displayName: string | null
+  email: string | null
+  photoURL: string | null
+}
 
 interface AuthContextType {
   isAuthenticated: boolean
   isLoading: boolean
-  login: (pin: string) => Promise<boolean>
+  user: AuthUser | null
+  error: string | null
+  signInWithGoogle: () => Promise<void>
   logout: () => void
 }
 
 const AuthContext = createContext<AuthContextType | null>(null)
 
-const AUTH_STORAGE_KEY = 'ppc_auth_session'
-const SESSION_DURATION = 24 * 60 * 60 * 1000 // 24 hours
-
-interface StoredSession {
-  timestamp: number
-}
-
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [isAuthenticated, setIsAuthenticated] = useState(false)
+  const [user, setUser] = useState<AuthUser | null>(null)
   const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
-  // Check for existing session on mount
   useEffect(() => {
-    const stored = localStorage.getItem(AUTH_STORAGE_KEY)
-    if (stored) {
-      try {
-        const session: StoredSession = JSON.parse(stored)
-        const now = Date.now()
-        if (now - session.timestamp < SESSION_DURATION) {
-          setIsAuthenticated(true)
-        } else {
-          // Session expired
-          localStorage.removeItem(AUTH_STORAGE_KEY)
-        }
-      } catch {
-        localStorage.removeItem(AUTH_STORAGE_KEY)
+    const unsubscribe = onAuthStateChanged(auth, (firebaseUser: User | null) => {
+      if (firebaseUser && firebaseUser.email?.endsWith('@easternmills.com')) {
+        setUser({
+          uid: firebaseUser.uid,
+          displayName: firebaseUser.displayName,
+          email: firebaseUser.email,
+          photoURL: firebaseUser.photoURL,
+        })
+      } else {
+        setUser(null)
       }
-    }
-    setIsLoading(false)
+      setIsLoading(false)
+    })
+
+    return () => unsubscribe()
   }, [])
 
-  const login = async (pin: string): Promise<boolean> => {
+  const signInWithGoogle = async () => {
+    setError(null)
     try {
-      const response = await fetch('/api/auth/verify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pin })
-      })
+      const result = await signInWithPopup(auth, googleProvider)
+      const email = result.user.email
 
-      const data = await response.json()
-
-      if (data.success) {
-        const session: StoredSession = { timestamp: Date.now() }
-        localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(session))
-        setIsAuthenticated(true)
-        return true
+      if (!email?.endsWith('@easternmills.com')) {
+        await signOut(auth)
+        setError('Access restricted to @easternmills.com accounts only.')
+        return
       }
-
-      return false
-    } catch (error) {
-      console.error('Login error:', error)
-      return false
+    } catch (err: unknown) {
+      const firebaseError = err as { code?: string; message?: string }
+      if (firebaseError.code === 'auth/popup-closed-by-user') {
+        return
+      }
+      console.error('Sign-in error:', err)
+      setError('Sign-in failed. Please try again.')
     }
   }
 
   const logout = () => {
-    localStorage.removeItem(AUTH_STORAGE_KEY)
-    setIsAuthenticated(false)
+    signOut(auth)
+    setUser(null)
   }
 
   return (
-    <AuthContext.Provider value={{ isAuthenticated, isLoading, login, logout }}>
+    <AuthContext.Provider
+      value={{
+        isAuthenticated: !!user,
+        isLoading,
+        user,
+        error,
+        signInWithGoogle,
+        logout,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   )

@@ -55,7 +55,7 @@ type FilterType = {
 }
 
 export function DashboardPage() {
-  const { logout } = useAuth()
+  const { logout, user } = useAuth()
   const queryClient = useQueryClient()
   const [search, setSearch] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
@@ -236,6 +236,27 @@ export function DashboardPage() {
             >
               <RefreshCw className={`h-4 w-4 ${isFetching ? 'animate-spin' : ''}`} />
             </Button>
+
+            {/* User info */}
+            {user && (
+              <div className="flex items-center gap-2 px-2">
+                {user.photoURL ? (
+                  <img
+                    src={user.photoURL}
+                    alt={user.displayName || ''}
+                    className="w-8 h-8 rounded-full"
+                    referrerPolicy="no-referrer"
+                  />
+                ) : (
+                  <div className="w-8 h-8 rounded-full bg-green-600 text-white flex items-center justify-center text-sm font-medium">
+                    {user.displayName?.charAt(0) || user.email?.charAt(0) || '?'}
+                  </div>
+                )}
+                <span className="text-sm text-gray-700 hidden sm:inline">
+                  {user.displayName?.split(' ')[0]}
+                </span>
+              </div>
+            )}
 
             {/* Logout */}
             <Button variant="ghost" size="sm" onClick={logout} className="h-8">

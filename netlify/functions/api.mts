@@ -128,24 +128,6 @@ export default async function handler(req: Request, context: Context): Promise<R
   const method = req.method
 
   try {
-    // AUTH: Verify PIN
-    if (path === '/auth/verify' && method === 'POST') {
-      const body = await req.json()
-      const { pin } = body
-
-      const expectedPin = process.env.PPC_ACCESS_PIN
-
-      if (!expectedPin) {
-        return jsonResponse({ success: false, error: 'PIN not configured' }, 500)
-      }
-
-      if (pin === expectedPin) {
-        return jsonResponse({ success: true })
-      }
-
-      return jsonResponse({ success: false, error: 'Invalid PIN' }, 401)
-    }
-
     // ORDERS: List open orders (status = 'sent')
     if (path === '/orders' && method === 'GET') {
       const search = url.searchParams.get('search')?.toLowerCase()
