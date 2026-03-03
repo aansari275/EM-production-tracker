@@ -1,10 +1,10 @@
 import { useState, useEffect, useMemo } from 'react'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import type { ProductionRow, TnaStage, StageStatus } from '@/types'
+import type { OrderWithTracker, TnaStage, StageStatus } from '@/types'
 import { TNA_STAGES, TNA_STAGE_LABELS, TNA_STAGE_SHORT_LABELS } from '@/types'
-import { formatDateShort, cn, isOverdue as checkOverdue, getScheduleStatus } from '@/lib/utils'
+import { formatOpsNo, formatDateShort, cn, isOverdue as checkOverdue, getScheduleStatus } from '@/lib/utils'
 import { useUpdateStage } from '@/hooks/useProductionTracker'
 import { useOrder } from '@/hooks/useOrders'
 import { TnaGanttTimeline } from './TnaGanttTimeline'
@@ -22,19 +22,8 @@ import {
 } from 'lucide-react'
 
 interface TnaViewProps {
-  rows: ProductionRow[]
+  orders: OrderWithTracker[]
   isLoading: boolean
-}
-
-// Group rows by OPS number for TNA view
-function groupByOps(rows: ProductionRow[]): Map<string, ProductionRow[]> {
-  const grouped = new Map<string, ProductionRow[]>()
-  rows.forEach(row => {
-    const existing = grouped.get(row.opsNo) || []
-    existing.push(row)
-    grouped.set(row.opsNo, existing)
-  })
-  return grouped
 }
 
 // Custom hook for responsive design
@@ -51,7 +40,7 @@ function useIsMobile() {
   return isMobile
 }
 
-export function TnaView({ rows, isLoading }: TnaViewProps) {
+export function TnaView({ orders, isLoading }: TnaViewProps) {
   const [expandedOps, setExpandedOps] = useState<Set<string>>(new Set())
   const isMobile = useIsMobile()
 
@@ -64,7 +53,7 @@ export function TnaView({ rows, isLoading }: TnaViewProps) {
     )
   }
 
-  if (rows.length === 0) {
+  if (orders.length === 0) {
     return (
       <div className="p-12 text-center">
         <Package className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
@@ -76,14 +65,12 @@ export function TnaView({ rows, isLoading }: TnaViewProps) {
     )
   }
 
-  const groupedOrders = groupByOps(rows)
-
-  const toggleOps = (opsNo: string) => {
+  const toggleOps = (orderId: string) => {
     const newExpanded = new Set(expandedOps)
-    if (newExpanded.has(opsNo)) {
-      newExpanded.delete(opsNo)
+    if (newExpanded.has(orderId)) {
+      newExpanded.delete(orderId)
     } else {
-      newExpanded.add(opsNo)
+      newExpanded.add(orderId)
     }
     setExpandedOps(newExpanded)
   }
@@ -91,17 +78,17 @@ export function TnaView({ rows, isLoading }: TnaViewProps) {
   return (
     <ScrollArea className="h-[calc(100vh-320px)]">
       <div className="space-y-3">
-        {Array.from(groupedOrders.entries()).map(([opsNo, opsRows]) => {
-          const isExpanded = expandedOps.has(opsNo)
-          const firstRow = opsRows[0]
-          const totalPcs = opsRows.reduce((sum, r) => sum + r.orderPcs, 0)
+        {orders.map((order) => {
+          const isExpanded = expandedOps.has(order.id)
+          const opsNo = formatOpsNo(order.salesNo)
+          const totalPcs = order.totalPcs || order.items?.reduce((sum, i) => sum + (i.pcs || 0), 0) || 0
 
           return (
-            <Card key={opsNo} className="overflow-hidden">
+            <Card key={order.id} className="overflow-hidden">
               {/* Order Header */}
               <div
                 className="p-4 bg-gray-50 cursor-pointer hover:bg-gray-100 transition-colors"
-                onClick={() => toggleOps(opsNo)}
+                onClick={() => toggleOps(order.id)}
               >
                 <div className="flex items-center justify-between gap-4">
                   <div className="flex items-center gap-4 min-w-0">
@@ -113,12 +100,12 @@ export function TnaView({ rows, isLoading }: TnaViewProps) {
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
                         <span className="font-mono font-bold text-lg">{opsNo}</span>
-                        <Badge variant={firstRow.companyCode === 'EMPL' ? 'default' : 'secondary'}>
-                          {firstRow.companyCode}
+                        <Badge variant={order.companyCode === 'EMPL' ? 'default' : 'secondary'}>
+                          {order.companyCode}
                         </Badge>
                       </div>
                       <div className="text-sm text-muted-foreground mt-1">
-                        {firstRow.customerCode} • {firstRow.merchant} • {opsRows.length} items • {totalPcs} pcs
+                        {order.customerCode} • {order.items?.length || 0} items • {totalPcs} pcs
                       </div>
                     </div>
                   </div>
@@ -126,7 +113,7 @@ export function TnaView({ rows, isLoading }: TnaViewProps) {
                   {/* Compact Progress Bar (collapsed view) */}
                   {!isExpanded && (
                     <div className="hidden md:block flex-1 max-w-md px-4">
-                      <CompactProgressBar orderId={firstRow.orderId} />
+                      <CompactProgressBar orderId={order.id} />
                     </div>
                   )}
 
@@ -134,9 +121,9 @@ export function TnaView({ rows, isLoading }: TnaViewProps) {
                     <div className="text-sm font-medium">Ex-Factory</div>
                     <div className={cn(
                       'font-bold',
-                      checkOverdue(firstRow.exFactoryDate) && 'text-red-600'
+                      checkOverdue(order.shipDate) && 'text-red-600'
                     )}>
-                      {formatDateShort(firstRow.exFactoryDate)}
+                      {formatDateShort(order.shipDate)}
                     </div>
                   </div>
                 </div>
@@ -146,10 +133,10 @@ export function TnaView({ rows, isLoading }: TnaViewProps) {
               {isExpanded && (
                 <CardContent className="p-4 pt-0">
                   <TnaTimelineWrapper
-                    orderId={firstRow.orderId}
+                    orderId={order.id}
                     opsNo={opsNo}
-                    poDate={firstRow.poDate}
-                    exFactoryDate={firstRow.exFactoryDate}
+                    poDate={order.orderConfirmationDate}
+                    exFactoryDate={order.shipDate}
                     isMobile={isMobile}
                   />
                 </CardContent>
@@ -426,7 +413,7 @@ function CompactProgressBar({ orderId }: { orderId: string }) {
 
   if (!progressData) return null
 
-  const { percent, completed, total, currentStage, scheduleStatus } = progressData
+  const { percent, currentStage, scheduleStatus } = progressData
 
   // Status icon and color
   const getStatusIndicator = () => {

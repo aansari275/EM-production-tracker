@@ -165,44 +165,6 @@ export interface Order {
   updatedAt: string
 }
 
-// Flattened row for Excel-style display (one row per item)
-export interface ProductionRow {
-  // From Order
-  orderId: string
-  companyCode: CompanyCode    // "Handled" column
-  customerCode: string        // Buyer Code
-  merchant: string            // Merchant (with assistant)
-  poDate: string              // PO Rcvd Date
-  exFactoryDate: string       // Ex-Factory Date
-  opsNo: string               // OPS # (formatted)
-
-  // From OrderItem
-  itemId: string
-  article: string             // Article name / EM Design
-  size: string
-  color: string
-  quality: string
-  orderPcs: number            // ORDER PCS
-
-  // From ProductionItemTracker (editable)
-  // Column mapping from Excel:
-  // - RCVD PCS → bazarDone (displayed as "Rcvd")
-  // - TO RCVD PCS → toRcvdPcs (displayed as "To Rcvd")
-  // - U/FINISHING → uFinishing (displayed as "Finish")
-  status: string              // Free text status
-  bazarDone: number           // Rcvd - from RCVD PCS column (bazar done qty)
-  toRcvdPcs: number           // To Rcvd - from TO RCVD PCS column (bazar pending)
-  oldStock: number            // Old stock pieces
-  uFinishing: number          // Finish - from U/FINISHING column
-
-  // Vendor info
-  vendorName: string
-  folioNo: string
-  supplierCompletionDate: string
-  orderIssueDate: string
-  orderType: string           // J, P, etc.
-}
-
 // Combined order with tracker data for display
 export interface OrderWithTracker extends Order {
   tracker?: ProductionTrackerEntry
@@ -214,17 +176,6 @@ export interface ApiResponse<T> {
   success: boolean
   data?: T
   error?: string
-}
-
-// ============== Dashboard Stats ==============
-
-export interface DashboardStats {
-  totalOrders: number
-  totalItems: number
-  totalPcs: number
-  byCompany: { EMPL: number; EHI: number }
-  overdue: number
-  thisWeek: number
 }
 
 // ============== WIP (Work In Progress) Types ==============
@@ -246,8 +197,10 @@ export interface WIPRow {
   totalPcs: number
   onLoom: number           // Currently being woven
   bazarPcs: number         // Received from weaver (bazar stage)
+  preFinishPcs: number     // Pre-finishing (binding, clipping, washing, etc.)
   finishingPcs: number     // In finishing pipeline
-  fgGodownPcs: number      // In finished goods godown
+  qcPcs: number            // QC (folding, AQL, move to warehouse)
+  fgGodownPcs: number      // In finished goods godown (kept for EMPL compat)
   packedPcs: number        // Packed and ready
   dispatchedPcs: number    // Already dispatched
   // Order item identifiers for drill-down
@@ -268,7 +221,9 @@ export interface WIPGroupedRow {
   totalPcs: number
   onLoom: number
   bazarPcs: number
+  preFinishPcs: number
   finishingPcs: number
+  qcPcs: number
   fgGodownPcs: number
   packedPcs: number
   dispatchedPcs: number
@@ -294,11 +249,38 @@ export interface WIPSummary {
   totalPcs: number
   onLoom: number
   inBazar: number
+  inPreFinish: number
   inFinishing: number
+  inQc: number
   packed: number
   dispatched: number
   byCompany: {
     EMPL: { orders: number; pcs: number }
     EHI: { orders: number; pcs: number }
   }
+}
+
+// ============== Carpet Search Types ==============
+
+export interface CarpetSearchResult {
+  company: 'EMPL' | 'EHI'
+  carpetNumber: string       // Stock number / carpet number
+  opsNo: string
+  buyerCode: string
+  buyerName: string
+  design: string
+  quality: string
+  color: string
+  size: string
+  currentProcess: string     // Process name (e.g., "FINISHING", "AQL")
+  currentProcessId: number
+  stage: 'loom' | 'pre_finish' | 'finishing' | 'qc' | 'packed' | 'dispatched'
+  stageLabel: string
+  packed: boolean
+}
+
+export interface CarpetSearchResponse {
+  success: boolean
+  results: CarpetSearchResult[]
+  query: string
 }

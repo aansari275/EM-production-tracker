@@ -1,23 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import type { Order, OrderWithTracker, ProductionTrackerEntry, DashboardStats, TnaStage, ProductionRow } from '@/types'
-
-// Fetch production rows (item-level, Excel-style format)
-export function useProductionRows(search?: string) {
-  return useQuery<ProductionRow[]>({
-    queryKey: ['production-rows', search],
-    queryFn: async () => {
-      const params = new URLSearchParams()
-      if (search) params.set('search', search)
-
-      const response = await fetch(`/api/production-rows?${params}`)
-      if (!response.ok) throw new Error('Failed to fetch production data')
-
-      const data = await response.json()
-      return data.data || []
-    },
-    staleTime: 30000, // 30 seconds
-  })
-}
+import type { Order, OrderWithTracker, ProductionTrackerEntry, TnaStage } from '@/types'
 
 // Fetch open orders (status = 'sent')
 export function useOrders(search?: string) {
@@ -51,53 +33,6 @@ export function useOrder(orderId: string | undefined) {
       return data.data
     },
     enabled: !!orderId,
-  })
-}
-
-// Fetch dashboard stats
-export function useDashboardStats() {
-  return useQuery<DashboardStats>({
-    queryKey: ['dashboard-stats'],
-    queryFn: async () => {
-      const response = await fetch('/api/dashboard/stats')
-      if (!response.ok) throw new Error('Failed to fetch stats')
-
-      const data = await response.json()
-      return data.data
-    },
-    staleTime: 60000, // 1 minute
-  })
-}
-
-// Interface for new orders data
-export interface NewOrdersData {
-  orders: Array<{
-    id: string
-    opsNo: string
-    buyerCode: string
-    buyerName: string
-    companyCode: 'EMPL' | 'EHI'
-    totalPcs: number
-    totalSqm: number
-    createdAt: string
-  }>
-  lastUploadedAt: string | null
-  isFirstUpload: boolean
-}
-
-// Fetch new orders (created after last Excel upload)
-export function useNewOrders() {
-  return useQuery<NewOrdersData>({
-    queryKey: ['new-orders'],
-    queryFn: async () => {
-      const response = await fetch('/api/production-status/new-orders')
-      if (!response.ok) throw new Error('Failed to fetch new orders')
-
-      const data = await response.json()
-      return data.data
-    },
-    staleTime: 60000, // 1 minute
-    refetchInterval: 5 * 60 * 1000, // Refetch every 5 minutes
   })
 }
 
