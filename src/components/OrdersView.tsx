@@ -1,13 +1,211 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, Fragment } from 'react'
 import { Badge } from '@/components/ui/badge'
-import type { OrderWithTracker } from '@/types'
-import { formatOpsNo, formatDateShort, isOverdue, cn } from '@/lib/utils'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
+import type { OrderWithTracker, OrderItem } from '@/types'
+import { formatOpsNo, formatDateShort, formatDate, daysUntil, cn } from '@/lib/utils'
 import {
   ChevronDown,
-  ChevronRight,
+  ChevronUp,
   Package,
   Loader2,
 } from 'lucide-react'
+
+// ============== DaysLeftBadge ==============
+
+function DaysLeftBadge({ shipDate }: { shipDate: string | null | undefined }) {
+  const days = daysUntil(shipDate)
+
+  if (!shipDate) {
+    return (
+      <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-gray-100 text-gray-600">
+        No Date
+      </span>
+    )
+  }
+
+  if (days === null) {
+    return (
+      <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-gray-100 text-gray-600">
+        Invalid Date
+      </span>
+    )
+  }
+
+  if (days < 0) {
+    return (
+      <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-red-100 text-red-700">
+        {Math.abs(days)}d overdue
+      </span>
+    )
+  }
+
+  if (days === 0) {
+    return (
+      <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-orange-100 text-orange-700">
+        Today
+      </span>
+    )
+  }
+
+  if (days <= 7) {
+    return (
+      <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-yellow-100 text-yellow-700">
+        {days}d left
+      </span>
+    )
+  }
+
+  if (days <= 30) {
+    return (
+      <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-blue-100 text-blue-700">
+        {days}d left
+      </span>
+    )
+  }
+
+  return (
+    <span className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium bg-green-100 text-green-700">
+      {days}d left
+    </span>
+  )
+}
+
+// ============== Expanded Order Details ==============
+
+function ExpandedOrderDetails({ order }: { order: OrderWithTracker }) {
+  const [showAllItems, setShowAllItems] = useState(false)
+
+  const totalPcs = order.totalPcs || order.items?.reduce((sum, i) => sum + (i.pcs || 0), 0) || 0
+  const totalSqm = order.totalSqm || order.items?.reduce((sum, i) => sum + (i.sqm || 0), 0) || 0
+  const itemCount = order.items?.length || 0
+
+  const visibleItems = showAllItems ? order.items : order.items?.slice(0, 10)
+  const hiddenCount = itemCount > 10 ? itemCount - 10 : 0
+
+  return (
+    <div className="bg-gray-50 px-4 py-4 space-y-4">
+      {/* Key Info Bar */}
+      <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
+        <div>
+          <span className="text-gray-500">PO No:</span>{' '}
+          <span className="font-medium">{order.poNo || '-'}</span>
+        </div>
+        <div>
+          <span className="text-gray-500">PO Rec'd:</span>{' '}
+          <span className="font-medium">{formatDate(order.orderConfirmationDate)}</span>
+        </div>
+        <div>
+          <span className="text-gray-500">Buyer Ship:</span>{' '}
+          <span className="font-medium">{formatDate(order.buyerPoShipDate)}</span>
+        </div>
+        <div>
+          <span className="text-gray-500">Company:</span>{' '}
+          <Badge
+            variant={order.companyCode === 'EMPL' ? 'default' : 'secondary'}
+            className="text-[10px] px-1.5 py-0 ml-1"
+          >
+            {order.companyCode}
+          </Badge>
+        </div>
+        <div>
+          <span className="text-gray-500">Merchant:</span>{' '}
+          <span className="font-medium">
+            {order.merchantCode || '-'}
+            {order.assistantMerchantCode ? ` + ${order.assistantMerchantCode}` : ''}
+          </span>
+        </div>
+      </div>
+
+      {/* Summary Stats Grid */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="bg-white rounded-lg border p-3 text-center">
+          <div className="text-lg font-semibold">{totalPcs.toLocaleString()}</div>
+          <div className="text-xs text-gray-500">Total Pcs</div>
+        </div>
+        <div className="bg-white rounded-lg border p-3 text-center">
+          <div className="text-lg font-semibold">{totalSqm.toFixed(1)}</div>
+          <div className="text-xs text-gray-500">Total SQM</div>
+        </div>
+        <div className="bg-white rounded-lg border p-3 text-center">
+          <div className="text-lg font-semibold">{itemCount}</div>
+          <div className="text-xs text-gray-500">Items</div>
+        </div>
+        <div className="bg-white rounded-lg border p-3 text-center">
+          <div className="text-lg font-semibold truncate">{order.customerCode}</div>
+          <div className="text-xs text-gray-500 truncate">{order.buyerName || 'Buyer'}</div>
+        </div>
+      </div>
+
+      {/* Items Table */}
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-xs text-gray-500 uppercase tracking-wide border-b">
+              <th className="text-left py-2 pr-4 font-medium">EM Design</th>
+              <th className="text-left py-2 pr-4 font-medium">Article / SKU</th>
+              <th className="text-left py-2 pr-4 font-medium">Size</th>
+              <th className="text-right py-2 pr-4 font-medium">Pcs</th>
+              <th className="text-right py-2 font-medium">SQM</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-200">
+            {visibleItems?.map((item: OrderItem) => (
+              <tr key={item.id} className="text-gray-700">
+                <td className="py-2 pr-4 font-medium">{item.emDesignName || '-'}</td>
+                <td className="py-2 pr-4 text-gray-500">{item.articleName || item.sku || '-'}</td>
+                <td className="py-2 pr-4">{item.size || '-'}</td>
+                <td className="py-2 pr-4 text-right font-medium">{item.pcs}</td>
+                <td className="py-2 text-right">{item.sqm?.toFixed(1) || '-'}</td>
+              </tr>
+            ))}
+          </tbody>
+          {itemCount > 1 && (
+            <tfoot>
+              <tr className="border-t-2 border-gray-300 font-semibold text-gray-800">
+                <td className="py-2 pr-4" colSpan={3}>Total</td>
+                <td className="py-2 pr-4 text-right">{totalPcs.toLocaleString()}</td>
+                <td className="py-2 text-right">{totalSqm.toFixed(1)}</td>
+              </tr>
+            </tfoot>
+          )}
+        </table>
+      </div>
+
+      {/* Show more toggle */}
+      {hiddenCount > 0 && !showAllItems && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation()
+            setShowAllItems(true)
+          }}
+          className="text-sm text-blue-600 hover:text-blue-800 font-medium"
+        >
+          Show {hiddenCount} more items
+        </button>
+      )}
+      {showAllItems && hiddenCount > 0 && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation()
+            setShowAllItems(false)
+          }}
+          className="text-sm text-blue-600 hover:text-blue-800 font-medium"
+        >
+          Show less
+        </button>
+      )}
+    </div>
+  )
+}
+
+// ============== Main OrdersView ==============
 
 interface OrdersViewProps {
   orders: OrderWithTracker[]
@@ -60,140 +258,78 @@ export function OrdersView({ orders, isLoading }: OrdersViewProps) {
   }
 
   return (
-    <div className="divide-y">
-      {sortedOrders.map((order) => {
-        const isExpanded = expandedOrders.has(order.id)
-        const opsNo = formatOpsNo(order.salesNo)
-        const overdue = isOverdue(order.shipDate)
-        const totalSqm = order.totalSqm || order.items?.reduce((sum, i) => sum + (i.sqm || 0), 0) || 0
-        const totalPcs = order.totalPcs || order.items?.reduce((sum, i) => sum + (i.pcs || 0), 0) || 0
+    <div>
+      <Table>
+        <TableHeader>
+          <TableRow className="bg-gray-50">
+            <TableHead className="w-[40px]"></TableHead>
+            <TableHead className="w-[90px]">OPS #</TableHead>
+            <TableHead className="w-[120px]">Buyer</TableHead>
+            <TableHead className="w-[70px] text-right">Qty</TableHead>
+            <TableHead className="w-[70px] text-right hidden sm:table-cell">SQM</TableHead>
+            <TableHead className="w-[100px] hidden sm:table-cell">Ex Factory</TableHead>
+            <TableHead className="w-[90px] text-center">Days Left</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {sortedOrders.map((order) => {
+            const isExpanded = expandedOrders.has(order.id)
+            const opsNo = formatOpsNo(order.salesNo)
+            const totalPcs = order.totalPcs || order.items?.reduce((sum, i) => sum + (i.pcs || 0), 0) || 0
+            const totalSqm = order.totalSqm || order.items?.reduce((sum, i) => sum + (i.sqm || 0), 0) || 0
 
-        return (
-          <div key={order.id}>
-            {/* Order Row */}
-            <div
-              className={cn(
-                'flex items-center gap-3 px-4 py-3 cursor-pointer transition-colors',
-                'hover:bg-gray-50',
-                isExpanded && 'bg-gray-50'
-              )}
-              onClick={() => toggleOrder(order.id)}
-            >
-              {/* Expand icon */}
-              <div className="flex-shrink-0 text-gray-400">
-                {isExpanded ? (
-                  <ChevronDown className="h-4 w-4" />
-                ) : (
-                  <ChevronRight className="h-4 w-4" />
-                )}
-              </div>
-
-              {/* OPS # */}
-              <div className="w-28 flex-shrink-0">
-                <span className="font-mono font-semibold text-sm">{opsNo}</span>
-              </div>
-
-              {/* Company Badge */}
-              <div className="w-14 flex-shrink-0">
-                <Badge
-                  variant={order.companyCode === 'EMPL' ? 'default' : 'secondary'}
-                  className="text-[10px] px-1.5 py-0"
-                >
-                  {order.companyCode}
-                </Badge>
-              </div>
-
-              {/* Buyer */}
-              <div className="w-16 flex-shrink-0">
-                <span className="text-sm font-medium text-gray-700">{order.customerCode}</span>
-              </div>
-
-              {/* Items count */}
-              <div className="w-16 flex-shrink-0 text-center">
-                <span className="text-sm text-gray-500">
-                  {order.items?.length || 0} item{(order.items?.length || 0) !== 1 ? 's' : ''}
-                </span>
-              </div>
-
-              {/* Total Pcs */}
-              <div className="w-20 flex-shrink-0 text-right">
-                <span className="text-sm font-medium">{totalPcs.toLocaleString()} pcs</span>
-              </div>
-
-              {/* Total SQM */}
-              <div className="w-20 flex-shrink-0 text-right hidden sm:block">
-                <span className="text-sm text-gray-500">{totalSqm.toFixed(1)} sqm</span>
-              </div>
-
-              {/* Ex-Factory */}
-              <div className="ml-auto flex-shrink-0 text-right">
-                <span
+            return (
+              <Fragment key={order.id}>
+                <TableRow
                   className={cn(
-                    'text-sm font-medium',
-                    overdue ? 'text-red-600' : 'text-gray-700'
+                    'cursor-pointer transition-colors hover:bg-gray-50',
+                    isExpanded && 'bg-gray-50 border-b-0'
                   )}
+                  onClick={() => toggleOrder(order.id)}
                 >
-                  {formatDateShort(order.shipDate)}
-                </span>
-              </div>
-            </div>
-
-            {/* Expanded Items Table */}
-            {isExpanded && (
-              <div className="bg-gray-50 border-t px-4 py-3">
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm">
-                    <thead>
-                      <tr className="text-xs text-gray-500 uppercase tracking-wide">
-                        <th className="text-left py-2 pr-4 font-medium">Article</th>
-                        <th className="text-left py-2 pr-4 font-medium">Size</th>
-                        <th className="text-left py-2 pr-4 font-medium">Color</th>
-                        <th className="text-left py-2 pr-4 font-medium">Quality</th>
-                        <th className="text-right py-2 pr-4 font-medium">Pcs</th>
-                        <th className="text-right py-2 font-medium">SQM</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-200">
-                      {order.items?.map((item) => (
-                        <tr key={item.id} className="text-gray-700">
-                          <td className="py-2 pr-4 font-medium">
-                            {item.emDesignName || item.articleName || '-'}
-                          </td>
-                          <td className="py-2 pr-4">{item.size || '-'}</td>
-                          <td className="py-2 pr-4">{item.color || '-'}</td>
-                          <td className="py-2 pr-4">{item.quality || '-'}</td>
-                          <td className="py-2 pr-4 text-right font-medium">{item.pcs}</td>
-                          <td className="py-2 text-right">{item.sqm?.toFixed(1) || '-'}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                    {(order.items?.length || 0) > 1 && (
-                      <tfoot>
-                        <tr className="border-t-2 border-gray-300 font-semibold text-gray-800">
-                          <td className="py-2 pr-4" colSpan={4}>Total</td>
-                          <td className="py-2 pr-4 text-right">{totalPcs.toLocaleString()}</td>
-                          <td className="py-2 text-right">{totalSqm.toFixed(1)}</td>
-                        </tr>
-                      </tfoot>
+                  <TableCell className="py-2 pr-0">
+                    {isExpanded ? (
+                      <ChevronUp className="h-4 w-4 text-gray-400" />
+                    ) : (
+                      <ChevronDown className="h-4 w-4 text-gray-400" />
                     )}
-                  </table>
-                </div>
+                  </TableCell>
+                  <TableCell className="py-2 font-medium font-mono text-sm">
+                    {opsNo}
+                  </TableCell>
+                  <TableCell className="py-2">
+                    <div>
+                      <span className="font-mono text-sm text-blue-600">{order.customerCode}</span>
+                      <div className="text-xs text-gray-500 truncate max-w-[110px]">{order.buyerName}</div>
+                    </div>
+                  </TableCell>
+                  <TableCell className="py-2 text-right text-sm">
+                    {totalPcs.toLocaleString()}
+                  </TableCell>
+                  <TableCell className="py-2 text-right text-sm hidden sm:table-cell">
+                    {totalSqm.toFixed(1)}
+                  </TableCell>
+                  <TableCell className="py-2 text-sm hidden sm:table-cell">
+                    {formatDateShort(order.shipDate)}
+                  </TableCell>
+                  <TableCell className="py-2 text-center">
+                    <DaysLeftBadge shipDate={order.shipDate} />
+                  </TableCell>
+                </TableRow>
 
-                {/* Order metadata */}
-                <div className="mt-3 pt-3 border-t border-gray-200 flex flex-wrap gap-x-6 gap-y-1 text-xs text-gray-500">
-                  <span>Buyer: {order.buyerName}</span>
-                  <span>PO: {order.poNo}</span>
-                  {order.shipDate && (
-                    <span>
-                      Ship Date: {formatDateShort(order.buyerPoShipDate || order.shipDate)}
-                    </span>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-        )
-      })}
+                {/* Expanded details as full-width row */}
+                {isExpanded && (
+                  <tr>
+                    <td colSpan={7} className="p-0 border-b">
+                      <ExpandedOrderDetails order={order} />
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
+            )
+          })}
+        </TableBody>
+      </Table>
     </div>
   )
 }

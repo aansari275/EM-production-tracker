@@ -15,7 +15,6 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { OrdersView } from '@/components/OrdersView'
 import { TnaView } from '@/components/TnaView'
-import { WIPPage } from '@/pages/WIPPage'
 import {
   Factory,
   LogOut,
@@ -29,7 +28,6 @@ import {
   User,
   AlertTriangle,
   Clock,
-  Activity,
 } from 'lucide-react'
 import { useQueryClient } from '@tanstack/react-query'
 
@@ -347,11 +345,7 @@ export function DashboardPage() {
           <TabsList className="bg-white border">
             <TabsTrigger value="orders" className="gap-2 data-[state=active]:bg-green-50 data-[state=active]:text-green-700">
               <Table className="h-4 w-4" />
-              Order Status
-            </TabsTrigger>
-            <TabsTrigger value="wip" className="gap-2 data-[state=active]:bg-green-50 data-[state=active]:text-green-700">
-              <Activity className="h-4 w-4" />
-              Live WIP
+              Orders
             </TabsTrigger>
             <TabsTrigger value="tna" className="gap-2 data-[state=active]:bg-green-50 data-[state=active]:text-green-700">
               <Calendar className="h-4 w-4" />
@@ -363,10 +357,6 @@ export function DashboardPage() {
             <div className="bg-white rounded-lg border">
               <OrdersView orders={filteredOrders} isLoading={isLoading} />
             </div>
-          </TabsContent>
-
-          <TabsContent value="wip" className="mt-3">
-            <WIPPage />
           </TabsContent>
 
           <TabsContent value="tna" className="mt-3">
