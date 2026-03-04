@@ -1,6 +1,7 @@
 import type { Context } from '@netlify/functions'
 import { initializeApp, getApps, cert } from 'firebase-admin/app'
 import { getFirestore } from 'firebase-admin/firestore'
+import { neon } from '@neondatabase/serverless'
 
 // Initialize Firebase Admin
 if (!getApps().length) {
@@ -245,6 +246,105 @@ export default async function handler(req: Request, context: Context): Promise<R
       }
 
       return jsonResponse({ success: true })
+    }
+
+    // PRODUCTION STATS: Live Neon ERP data (Bazar/Bal per OPS)
+    if (path === '/production-stats' && method === 'GET') {
+      const stats: Record<string, { pcs: number; bazar: number; bal: number }> = {}
+
+      // Query EMPL Neon
+      const emplUrl = process.env.EMPL_DATABASE_URL
+      if (emplUrl) {
+        try {
+          const sql = neon(emplUrl)
+          const rows = await sql`
+            SELECT
+              o.order_number as ops_no,
+              COALESCE(SUM(oi.quantity), 0)::int as pcs,
+              COALESCE(SUM(CASE WHEN oi.status IN ('bazar_done', 'finishing', 'fg_godown', 'packed', 'dispatched') THEN oi.quantity ELSE 0 END), 0)::int as bazar,
+              COALESCE(SUM(CASE WHEN oi.status NOT IN ('bazar_done', 'finishing', 'fg_godown', 'packed', 'dispatched') THEN oi.quantity ELSE 0 END), 0)::int as bal
+            FROM orders o
+            JOIN order_items oi ON o.id = oi.order_id
+            WHERE o.status IN ('active', 'open', 'Active', 'Open')
+              AND (o.order_number LIKE 'EM-25-%' OR o.order_number LIKE 'EM-26-%')
+            GROUP BY o.order_number
+          `
+          for (const row of rows) {
+            if (row.ops_no) {
+              stats[row.ops_no] = {
+                pcs: Number(row.pcs) || 0,
+                bazar: Number(row.bazar) || 0,
+                bal: Number(row.bal) || 0,
+              }
+            }
+          }
+        } catch (err) {
+          console.error('EMPL production stats error:', err)
+        }
+      }
+
+      // Query EHI Neon
+      const ehiUrl = process.env.EHI_DATABASE_URL
+      if (ehiUrl) {
+        try {
+          const sql = neon(ehiUrl)
+          const rows = await sql`
+            SELECT
+              o.customer_order_no as ops_no,
+              COALESCE(SUM(od.qty_required), 0)::int as pcs,
+              COALESCE(COUNT(CASE WHEN c.current_pro_status > 1 THEN 1 END), 0)::int as bazar,
+              COALESCE(SUM(od.qty_required), 0)::int - COALESCE(COUNT(CASE WHEN c.current_pro_status > 1 THEN 1 END), 0)::int as bal
+            FROM order_master o
+            JOIN order_detail od ON o.order_id = od.order_id
+            LEFT JOIN carpet_number c ON c.item_finished_id = od.item_finished_id AND c.order_id = o.order_id
+            WHERE o.status = '0'
+            GROUP BY o.customer_order_no
+          `
+          for (const row of rows) {
+            if (row.ops_no) {
+              // Format EHI OPS to match display format
+              const opsKey = row.ops_no
+              stats[opsKey] = {
+                pcs: Number(row.pcs) || 0,
+                bazar: Number(row.bazar) || 0,
+                bal: Math.max(0, Number(row.bal) || 0),
+              }
+            }
+          }
+        } catch (err) {
+          console.error('EHI production stats error:', err)
+        }
+      }
+
+      return jsonResponse(stats)
+    }
+
+    // INSPECTION SCHEDULES: Read from Firestore
+    if (path === '/inspection-schedules' && method === 'GET') {
+      const startDate = url.searchParams.get('startDate')
+      const endDate = url.searchParams.get('endDate')
+
+      let query: FirebaseFirestore.Query = db.collection('inspection_schedules')
+
+      if (startDate) {
+        query = query.where('inspectionDate', '>=', startDate)
+      }
+      if (endDate) {
+        query = query.where('inspectionDate', '<=', endDate)
+      }
+
+      const snapshot = await query.get()
+      const schedules = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+      }))
+
+      // Sort by date
+      schedules.sort((a: any, b: any) =>
+        (a.inspectionDate || '').localeCompare(b.inspectionDate || '')
+      )
+
+      return jsonResponse({ schedules })
     }
 
     // Not found

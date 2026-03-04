@@ -15,6 +15,8 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { OrdersView } from '@/components/OrdersView'
 import { TnaView } from '@/components/TnaView'
+import { InspectionCalendarView } from '@/components/InspectionCalendarView'
+import { useProductionStats } from '@/hooks/useProductionStats'
 import {
   Factory,
   LogOut,
@@ -22,10 +24,12 @@ import {
   RefreshCw,
   Table,
   Calendar,
+  CalendarCheck,
   Filter,
   X,
   Building2,
   User,
+  Users,
   AlertTriangle,
   Clock,
 } from 'lucide-react'
@@ -34,6 +38,7 @@ import { useQueryClient } from '@tanstack/react-query'
 type FilterType = {
   company: 'all' | 'EMPL' | 'EHI'
   buyer: string
+  merchant: string
   overdue: boolean
   thisWeek: boolean
 }
@@ -49,11 +54,13 @@ export function DashboardPage() {
   const [filters, setFilters] = useState<FilterType>({
     company: 'all',
     buyer: '',
+    merchant: '',
     overdue: false,
     thisWeek: false,
   })
 
   const { data: orders = [], isLoading, isFetching } = useOrders(debouncedSearch)
+  const { data: productionStats } = useProductionStats()
 
   // Debounced search
   useEffect(() => {
@@ -79,6 +86,15 @@ export function DashboardPage() {
     return Array.from(buyerSet).sort()
   }, [orders])
 
+  // Extract unique merchants for filter dropdown
+  const merchants = useMemo(() => {
+    const merchantSet = new Set<string>()
+    orders.forEach((order) => {
+      if (order.merchantCode) merchantSet.add(order.merchantCode)
+    })
+    return Array.from(merchantSet).sort()
+  }, [orders])
+
   // Apply client-side filters
   const filteredOrders = useMemo(() => {
     return orders.filter((order) => {
@@ -89,6 +105,11 @@ export function DashboardPage() {
 
       // Buyer filter
       if (filters.buyer && order.customerCode !== filters.buyer) {
+        return false
+      }
+
+      // Merchant filter
+      if (filters.merchant && order.merchantCode !== filters.merchant) {
         return false
       }
 
@@ -125,6 +146,7 @@ export function DashboardPage() {
     setFilters({
       company: 'all',
       buyer: '',
+      merchant: '',
       overdue: false,
       thisWeek: false,
     })
@@ -133,6 +155,7 @@ export function DashboardPage() {
   const activeFilterCount =
     (filters.company !== 'all' ? 1 : 0) +
     (filters.buyer ? 1 : 0) +
+    (filters.merchant ? 1 : 0) +
     (filters.overdue ? 1 : 0) +
     (filters.thisWeek ? 1 : 0)
 
@@ -312,12 +335,49 @@ export function DashboardPage() {
               </DropdownMenuContent>
             </DropdownMenu>
 
+            {/* Merchant Filter */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  variant={filters.merchant ? 'default' : 'outline'}
+                  size="sm"
+                  className={`h-9 text-xs ${filters.merchant ? 'bg-green-600 hover:bg-green-700' : ''}`}
+                >
+                  <Users className="h-3 w-3 mr-1" />
+                  {filters.merchant || 'Merchant'}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-40 max-h-64 overflow-y-auto">
+                <DropdownMenuCheckboxItem
+                  checked={!filters.merchant}
+                  onCheckedChange={() => setFilters((f) => ({ ...f, merchant: '' }))}
+                >
+                  All Merchants
+                </DropdownMenuCheckboxItem>
+                <DropdownMenuSeparator />
+                {merchants.map((merchant) => (
+                  <DropdownMenuCheckboxItem
+                    key={merchant}
+                    checked={filters.merchant === merchant}
+                    onCheckedChange={() => setFilters((f) => ({ ...f, merchant }))}
+                  >
+                    {merchant}
+                  </DropdownMenuCheckboxItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
+
             {/* Active Filter Pills */}
             {activeFilterCount > 0 && (
               <div className="flex items-center gap-1 ml-2">
                 {filters.company !== 'all' && (
                   <Badge variant="secondary" className="text-xs cursor-pointer" onClick={() => setFilters((f) => ({ ...f, company: 'all' }))}>
                     {filters.company} <X className="h-3 w-3 ml-1" />
+                  </Badge>
+                )}
+                {filters.merchant && (
+                  <Badge variant="secondary" className="text-xs cursor-pointer" onClick={() => setFilters((f) => ({ ...f, merchant: '' }))}>
+                    {filters.merchant} <X className="h-3 w-3 ml-1" />
                   </Badge>
                 )}
                 {filters.overdue && (
@@ -347,6 +407,10 @@ export function DashboardPage() {
               <Table className="h-4 w-4" />
               Orders
             </TabsTrigger>
+            <TabsTrigger value="inspections" className="gap-2 data-[state=active]:bg-green-50 data-[state=active]:text-green-700">
+              <CalendarCheck className="h-4 w-4" />
+              Inspections
+            </TabsTrigger>
             <TabsTrigger value="tna" className="gap-2 data-[state=active]:bg-green-50 data-[state=active]:text-green-700">
               <Calendar className="h-4 w-4" />
               TNA Timeline
@@ -355,8 +419,12 @@ export function DashboardPage() {
 
           <TabsContent value="orders" className="mt-3">
             <div className="bg-white rounded-lg border">
-              <OrdersView orders={filteredOrders} isLoading={isLoading} />
+              <OrdersView orders={filteredOrders} isLoading={isLoading} productionStats={productionStats} />
             </div>
+          </TabsContent>
+
+          <TabsContent value="inspections" className="mt-3">
+            <InspectionCalendarView />
           </TabsContent>
 
           <TabsContent value="tna" className="mt-3">

@@ -8,7 +8,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import type { OrderWithTracker, OrderItem } from '@/types'
+import type { OrderWithTracker, OrderItem, ProductionStatsMap } from '@/types'
 import { formatOpsNo, formatDateShort, formatDate, daysUntil, cn } from '@/lib/utils'
 import {
   ChevronDown,
@@ -210,9 +210,10 @@ function ExpandedOrderDetails({ order }: { order: OrderWithTracker }) {
 interface OrdersViewProps {
   orders: OrderWithTracker[]
   isLoading: boolean
+  productionStats?: ProductionStatsMap
 }
 
-export function OrdersView({ orders, isLoading }: OrdersViewProps) {
+export function OrdersView({ orders, isLoading, productionStats }: OrdersViewProps) {
   const [expandedOrders, setExpandedOrders] = useState<Set<string>>(new Set())
 
   // Sort by Ex-Factory date (nearest first)
@@ -264,8 +265,12 @@ export function OrdersView({ orders, isLoading }: OrdersViewProps) {
           <TableRow className="bg-gray-50">
             <TableHead className="w-[40px]"></TableHead>
             <TableHead className="w-[90px]">OPS #</TableHead>
-            <TableHead className="w-[120px]">Buyer</TableHead>
+            <TableHead className="w-[80px]">Buyer</TableHead>
+            <TableHead className="w-[80px] hidden sm:table-cell">Merchant</TableHead>
+            <TableHead className="w-[60px] hidden sm:table-cell">Type</TableHead>
             <TableHead className="w-[70px] text-right">Qty</TableHead>
+            <TableHead className="w-[60px] text-right hidden md:table-cell">Bazar</TableHead>
+            <TableHead className="w-[60px] text-right hidden md:table-cell">Bal</TableHead>
             <TableHead className="w-[70px] text-right hidden sm:table-cell">SQM</TableHead>
             <TableHead className="w-[100px] hidden sm:table-cell">Ex Factory</TableHead>
             <TableHead className="w-[90px] text-center">Days Left</TableHead>
@@ -277,6 +282,11 @@ export function OrdersView({ orders, isLoading }: OrdersViewProps) {
             const opsNo = formatOpsNo(order.salesNo)
             const totalPcs = order.totalPcs || order.items?.reduce((sum, i) => sum + (i.pcs || 0), 0) || 0
             const totalSqm = order.totalSqm || order.items?.reduce((sum, i) => sum + (i.sqm || 0), 0) || 0
+
+            // Production stats lookup
+            const stats = productionStats?.[formatOpsNo(order.salesNo)]
+            const bazarPct = stats && stats.pcs > 0 ? Math.round((stats.bazar / stats.pcs) * 100) : null
+            const bal = stats ? stats.bal : null
 
             return (
               <Fragment key={order.id}>
@@ -298,13 +308,46 @@ export function OrdersView({ orders, isLoading }: OrdersViewProps) {
                     {opsNo}
                   </TableCell>
                   <TableCell className="py-2">
-                    <div>
-                      <span className="font-mono text-sm text-blue-600">{order.customerCode}</span>
-                      <div className="text-xs text-gray-500 truncate max-w-[110px]">{order.buyerName}</div>
-                    </div>
+                    <span className="font-mono text-sm text-blue-600">{order.customerCode}</span>
+                  </TableCell>
+                  <TableCell className="py-2 text-sm text-gray-600 hidden sm:table-cell">
+                    {order.merchantCode || '-'}
+                  </TableCell>
+                  <TableCell className="py-2 hidden sm:table-cell">
+                    <span className={cn(
+                      'inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium',
+                      order.orderType === 'samples'
+                        ? 'bg-blue-100 text-blue-700'
+                        : 'bg-green-100 text-green-700'
+                    )}>
+                      {order.orderType === 'samples' ? 'Sample' : 'Prod'}
+                    </span>
                   </TableCell>
                   <TableCell className="py-2 text-right text-sm">
                     {totalPcs.toLocaleString()}
+                  </TableCell>
+                  <TableCell className="py-2 text-right hidden md:table-cell">
+                    {bazarPct !== null ? (
+                      <span className={cn(
+                        'inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium',
+                        bazarPct >= 90 ? 'bg-green-100 text-green-700' :
+                        bazarPct >= 50 ? 'bg-amber-100 text-amber-700' :
+                        'bg-red-100 text-red-700'
+                      )}>
+                        {bazarPct}%
+                      </span>
+                    ) : (
+                      <span className="text-xs text-gray-400">-</span>
+                    )}
+                  </TableCell>
+                  <TableCell className="py-2 text-right hidden md:table-cell">
+                    {bal !== null && bal > 0 ? (
+                      <span className="inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium bg-red-100 text-red-700">
+                        {bal.toLocaleString()}
+                      </span>
+                    ) : (
+                      <span className="text-xs text-gray-400">{bal === 0 ? '\u2014' : '-'}</span>
+                    )}
                   </TableCell>
                   <TableCell className="py-2 text-right text-sm hidden sm:table-cell">
                     {totalSqm.toFixed(1)}
@@ -320,7 +363,7 @@ export function OrdersView({ orders, isLoading }: OrdersViewProps) {
                 {/* Expanded details as full-width row */}
                 {isExpanded && (
                   <tr>
-                    <td colSpan={7} className="p-0 border-b">
+                    <td colSpan={11} className="p-0 border-b">
                       <ExpandedOrderDetails order={order} />
                     </td>
                   </tr>

@@ -4,19 +4,22 @@
 Excel-style production tracker for the Production Planning & Control (PPC) team. Matches the "Running Order Status" Excel format that PPC uses daily.
 
 **Live URL**: https://em-production-tracker.netlify.app
-**PIN**: ppc2024
 
 ## Tech Stack
 - **Frontend**: React 18 + TypeScript, Vite, Tailwind CSS, shadcn/ui
 - **Backend**: Netlify Functions (serverless)
 - **Database**: Firebase Firestore (same `easternmillscom` project)
+- **Auth**: Firebase Auth (Google OAuth)
 - **State**: TanStack Query (React Query)
 - **Hosting**: Netlify
 
 ## Authentication
-- Simple PIN authentication (not Firebase Auth)
-- PIN stored in `PPC_ACCESS_PIN` environment variable
-- Session stored in localStorage
+- Google OAuth via Firebase Auth (replaced PIN-based login in Mar 2026)
+- Restricted to `@easternmills.com` accounts only (enforced via `hd` param + post-sign-in check)
+- Firebase Auth persistence handles sessions automatically (no localStorage)
+- User avatar and name displayed in dashboard header
+- Google sign-in provider enabled in Firebase Console for `easternmillscom` project
+- `em-production-tracker.netlify.app` added to Firebase Auth authorized domains
 
 ## Key Features
 
@@ -147,7 +150,6 @@ interface ProductionTrackerEntry {
 ## API Endpoints
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/auth/verify` | POST | Verify PIN |
 | `/api/orders` | GET | List open orders (status=sent) |
 | `/api/production-rows` | GET | Get item-level rows (Excel format) |
 | `/api/dashboard/stats` | GET | Dashboard statistics |
@@ -218,8 +220,10 @@ FIREBASE_PROJECT_ID=easternmillscom
 FIREBASE_CLIENT_EMAIL=firebase-adminsdk-fbsvc@easternmillscom.iam.gserviceaccount.com
 FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
 
-# PPC Access
-PPC_ACCESS_PIN=ppc2024
+# Firebase Client (for Google Auth on frontend)
+VITE_FIREBASE_API_KEY=AIzaSyBSnzCBh-nhQs2nNuPpV_xpRp29FyUyHuc
+VITE_FIREBASE_MESSAGING_SENDER_ID=249673281284
+VITE_FIREBASE_APP_ID=1:249673281284:web:2ca71b5a1d41936d0d2a51
 
 # WIP Databases (Netlify env vars)
 EMPL_DATABASE_URL=postgresql://...@neon.tech/neondb?sslmode=require

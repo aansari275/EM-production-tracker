@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
- * EHI SQL Server → Neon PostgreSQL Sync Script
+ * EHI SQL Server → Neon PostgreSQL Sync Script (v2 — Bulk optimized)
  *
- * Syncs WIP-relevant data from EHI's SQL Server (EMBH database)
- * to a Neon PostgreSQL database for the Production Tracker WIP view.
+ * Uses PostgreSQL unnest() for bulk inserts instead of row-by-row.
+ * Full sync now takes ~1 min instead of ~35 min.
  *
  * Prerequisites:
  *   npm install mssql pg dotenv   (these are NOT in package.json — sync-only deps)
@@ -57,22 +57,6 @@ const EHI_PG_URL = process.env.EHI_DATABASE_URL;
 // Process Stage Mapping — Maps EHI process numbers to WIP stages
 // ============================================================================
 
-// Process stages from PROCESS_NAME_MASTER:
-// 1=WEAVING, 2=WASHING, 3=FINISHING, 4=KNOTTING, 5=DYEING, 6=STRETCHING,
-// 7=PACKING, 8=BINDING, 9=PURCHASE, 10=STORE, 11=YARN OPENING, 12=WARPING WOOL,
-// 13=WARPING COTTON, 14=CLIPPING, 15=LATX & THI PCK, 16=MENDING, 17=FOLDING,
-// 18=TABLE TUFT, 19=REPAIRING, 20=FINISHING-1, 21=AQL, 22=MOVE TO WAREHOUSE,
-// 23=TUMPLING, 24=EDGE BINDING, 25=SAMPLING PACKED, 26=FARGSTARK RED,
-// 27=PACKING-RT, 28=CUTTING, 29=OVERLOCKING, 30=FRINGING, 31=DUBBLE NIDDLE,
-// 32=SPINNING, 33=STITCHING, 34=TUSCEL, 35=PRE PILE CUTTING,
-// 36=MOVE TO FINISHING, 37=MOVE TO EMPL
-//
-// BAZAR NOTE: "Bazar" is NOT a process in EHI. It's the event of receiving the rug
-// from the weaver (off-loom). In the ERP, it's tracked via PROCESS_RECEIVE_MASTER_1 /
-// PROCESS_RECEIVE_DETAIL_1. Once CurrentProStatus moves past 1 (WEAVING), the rug
-// has gone through bazar. For WIP, we track "bazar_done" as CurrentProStatus > 1.
-// The wip_stage field tracks the CURRENT location, not whether bazar happened.
-
 const WIP_STAGE = {
   ON_LOOM: 'on_loom',
   FINISHING: 'finishing',
@@ -84,9 +68,8 @@ function getWipStage(processId) {
   if (processId === 1) return WIP_STAGE.ON_LOOM;
   if ([7, 25, 27].includes(processId)) return WIP_STAGE.PACKED;
   if ([21, 22].includes(processId)) return WIP_STAGE.FG_GODOWN;
-  // Everything past weaving and not packed/FG = finishing pipeline
   if (processId >= 2 && processId <= 37) return WIP_STAGE.FINISHING;
-  return WIP_STAGE.ON_LOOM; // Default
+  return WIP_STAGE.ON_LOOM;
 }
 
 // ============================================================================
@@ -104,21 +87,19 @@ function logError(msg, err) {
 }
 
 // ============================================================================
-// Schema — Create EHI tables in Neon PostgreSQL
+// Schema
 // ============================================================================
 
 const CREATE_TABLES_SQL = `
--- EHI WIP Schema (simplified for Production Tracker)
-
 CREATE TABLE IF NOT EXISTS ehi_orders (
   id SERIAL PRIMARY KEY,
-  order_no VARCHAR(100),              -- CustomerOrderNo (e.g., "EM-25-1148")
-  order_id_src INT,                   -- Original OrderMaster.OrderId
-  buyer_code VARCHAR(50),             -- customerinfo.CustomerCode (e.g., "J-01")
+  order_no VARCHAR(100),
+  order_id_src INT,
+  buyer_code VARCHAR(50),
   order_date DATE,
-  dispatch_date DATE,                 -- Ex-factory date
-  status VARCHAR(20),                 -- '0'=Open, '1'=Closed
-  local_order VARCHAR(200),           -- LocalOrder field (orderNo, buyerCode, ref)
+  dispatch_date DATE,
+  status VARCHAR(20),
+  local_order VARCHAR(200),
   total_pcs INT DEFAULT 0,
   total_items INT DEFAULT 0,
   synced_at TIMESTAMPTZ DEFAULT NOW()
@@ -127,8 +108,9 @@ CREATE TABLE IF NOT EXISTS ehi_orders (
 CREATE TABLE IF NOT EXISTS ehi_order_items (
   id SERIAL PRIMARY KEY,
   order_id INT REFERENCES ehi_orders(id) ON DELETE CASCADE,
-  order_detail_id_src INT,            -- Original OrderDetail.OrderDetailId
-  item_finished_id INT,               -- ITEM_PARAMETER_MASTER key
+  order_detail_id_src INT,
+  order_id_src INT,
+  item_finished_id INT,
   design_name VARCHAR(200),
   size VARCHAR(100),
   color VARCHAR(200),
@@ -140,20 +122,20 @@ CREATE TABLE IF NOT EXISTS ehi_order_items (
 
 CREATE TABLE IF NOT EXISTS ehi_carpets (
   id SERIAL PRIMARY KEY,
-  stock_no INT,                       -- CarpetNumber.StockNo
-  t_stock_no VARCHAR(100),            -- CarpetNumber.TStockNo (text stock no)
+  stock_no INT,
+  t_stock_no VARCHAR(100),
   order_item_id INT REFERENCES ehi_order_items(id) ON DELETE CASCADE,
-  current_process INT,                -- CarpetNumber.CurrentProStatus (process ID)
+  current_process INT,
   current_process_name VARCHAR(200),
-  wip_stage VARCHAR(30),              -- Mapped: on_loom, bazar, finishing, fg_godown, packed
+  wip_stage VARCHAR(30),
   is_packed BOOLEAN DEFAULT FALSE,
   synced_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS ehi_process_names (
-  id INT PRIMARY KEY,                 -- PROCESS_NAME_ID
-  name VARCHAR(200),                  -- PROCESS_NAME
-  short_name VARCHAR(50)              -- ShortName
+  id INT PRIMARY KEY,
+  name VARCHAR(200),
+  short_name VARCHAR(50)
 );
 
 CREATE TABLE IF NOT EXISTS ehi_sync_log (
@@ -168,7 +150,6 @@ CREATE TABLE IF NOT EXISTS ehi_sync_log (
   status VARCHAR(20) DEFAULT 'running'
 );
 
--- Indexes
 CREATE INDEX IF NOT EXISTS idx_ehi_carpets_order_item ON ehi_carpets(order_item_id);
 CREATE INDEX IF NOT EXISTS idx_ehi_carpets_process ON ehi_carpets(current_process);
 CREATE INDEX IF NOT EXISTS idx_ehi_carpets_wip_stage ON ehi_carpets(wip_stage);
@@ -184,7 +165,6 @@ CREATE INDEX IF NOT EXISTS idx_ehi_carpets_stock_no ON ehi_carpets(stock_no);
 async function runDiscovery(sqlPool) {
   log('=== Running Discovery Queries ===');
 
-  // Process names
   log('\n--- Process Names (PROCESS_NAME_MASTER) ---');
   const procs = await sqlPool.query(
     'SELECT PROCESS_NAME_ID, PROCESS_NAME, ShortName FROM PROCESS_NAME_MASTER ORDER BY PROCESS_NAME_ID'
@@ -193,7 +173,6 @@ async function runDiscovery(sqlPool) {
     log(`  ${p.PROCESS_NAME_ID}: ${p.PROCESS_NAME} (${p.ShortName || ''})`);
   });
 
-  // Open orders count
   log('\n--- Order Status Distribution ---');
   const statuses = await sqlPool.query(
     "SELECT Status, COUNT(*) as cnt FROM OrderMaster GROUP BY Status"
@@ -202,7 +181,6 @@ async function runDiscovery(sqlPool) {
     log(`  Status '${s.Status}': ${s.cnt} orders`);
   });
 
-  // Sample open order with detail
   log('\n--- Sample Open Orders (top 5) ---');
   const orders = await sqlPool.query(`
     SELECT TOP 5 om.OrderId, om.CustomerOrderNo, ci.CustomerCode,
@@ -216,7 +194,6 @@ async function runDiscovery(sqlPool) {
     log(`  ${o.CustomerOrderNo} | ${o.CustomerCode} | ${o.LocalOrder}`);
   });
 
-  // Carpet process distribution
   log('\n--- Carpet Process Distribution (Open Orders) ---');
   const dist = await sqlPool.query(`
     SELECT cn.CurrentProStatus, pnm.PROCESS_NAME, COUNT(*) as cnt
@@ -235,13 +212,45 @@ async function runDiscovery(sqlPool) {
 }
 
 // ============================================================================
-// Sync Logic
+// Bulk Insert Helpers
+// ============================================================================
+
+/**
+ * Bulk insert using unnest arrays. Fast: 10K+ rows per query.
+ * @param {pg.Client} pgClient
+ * @param {string} table - Table name
+ * @param {string[]} columns - Column names
+ * @param {string[]} types - PostgreSQL types for unnest casting (e.g. 'int[]', 'text[]')
+ * @param {Array[]} arrays - Array of column arrays (each column's values as an array)
+ * @param {number} batchSize - Rows per INSERT (default 10000)
+ */
+async function bulkInsert(pgClient, table, columns, types, arrays, batchSize = 10000) {
+  const totalRows = arrays[0].length;
+  if (totalRows === 0) return;
+
+  for (let offset = 0; offset < totalRows; offset += batchSize) {
+    const end = Math.min(offset + batchSize, totalRows);
+    const batchArrays = arrays.map(arr => arr.slice(offset, end));
+
+    const unnestParams = types.map((type, i) => `$${i + 1}::${type}`).join(', ');
+    const colAliases = columns.join(', ');
+
+    await pgClient.query(
+      `INSERT INTO ${table} (${colAliases}, synced_at)
+       SELECT ${columns.map((_, i) => `u.c${i}`).join(', ')}, NOW()
+       FROM unnest(${unnestParams}) AS u(${columns.map((_, i) => `c${i}`).join(', ')})`,
+      batchArrays
+    );
+  }
+}
+
+// ============================================================================
+// Sync Logic (v2 — Bulk)
 // ============================================================================
 
 async function syncOrders(sqlPool, pgClient) {
   log('Syncing orders...');
 
-  // Fetch open orders from EHI (Status = '0')
   const result = await sqlPool.query(`
     SELECT
       om.OrderId,
@@ -261,36 +270,47 @@ async function syncOrders(sqlPool, pgClient) {
 
   log(`  Found ${result.recordset.length} open orders in EHI`);
 
-  // Clear existing and insert fresh
-  await pgClient.query('DELETE FROM ehi_carpets');
-  await pgClient.query('DELETE FROM ehi_order_items');
-  await pgClient.query('DELETE FROM ehi_orders');
+  // Clear existing
+  await pgClient.query('TRUNCATE ehi_carpets, ehi_order_items, ehi_orders RESTART IDENTITY CASCADE');
 
-  let orderCount = 0;
-  const orderIdMap = new Map(); // EHI OrderId → PG id
+  // Build column arrays
+  const orderNos = [];
+  const orderIdSrcs = [];
+  const buyerCodes = [];
+  const orderDates = [];
+  const dispatchDates = [];
+  const statuses = [];
+  const localOrders = [];
+  const totalPcs = [];
+  const totalItems = [];
 
-  for (const order of result.recordset) {
-    const res = await pgClient.query(`
-      INSERT INTO ehi_orders (order_no, order_id_src, buyer_code, order_date, dispatch_date, status, local_order, total_pcs, total_items, synced_at)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
-      RETURNING id
-    `, [
-      order.CustomerOrderNo || '',
-      order.OrderId,
-      order.CustomerCode || '',
-      order.OrderDate || null,
-      order.DispatchDate || null,
-      order.Status || '0',
-      order.LocalOrder || '',
-      order.TotalPcs || 0,
-      order.ItemCount || 0,
-    ]);
-
-    orderIdMap.set(order.OrderId, res.rows[0].id);
-    orderCount++;
+  for (const o of result.recordset) {
+    orderNos.push(o.CustomerOrderNo || '');
+    orderIdSrcs.push(o.OrderId);
+    buyerCodes.push(o.CustomerCode || '');
+    orderDates.push(o.OrderDate || null);
+    dispatchDates.push(o.DispatchDate || null);
+    statuses.push(o.Status || '0');
+    localOrders.push(o.LocalOrder || '');
+    totalPcs.push(o.TotalPcs || 0);
+    totalItems.push(o.ItemCount || 0);
   }
 
-  log(`  Synced ${orderCount} orders`);
+  await bulkInsert(pgClient, 'ehi_orders',
+    ['order_no', 'order_id_src', 'buyer_code', 'order_date', 'dispatch_date', 'status', 'local_order', 'total_pcs', 'total_items'],
+    ['text[]', 'int[]', 'text[]', 'date[]', 'date[]', 'text[]', 'text[]', 'int[]', 'int[]'],
+    [orderNos, orderIdSrcs, buyerCodes, orderDates, dispatchDates, statuses, localOrders, totalPcs, totalItems],
+    5000
+  );
+
+  // Build orderIdMap: EHI OrderId → PG id
+  const mapResult = await pgClient.query('SELECT id, order_id_src FROM ehi_orders');
+  const orderIdMap = new Map();
+  for (const row of mapResult.rows) {
+    orderIdMap.set(row.order_id_src, row.id);
+  }
+
+  log(`  Synced ${orderIdMap.size} orders`);
   return orderIdMap;
 }
 
@@ -300,12 +320,12 @@ async function syncOrderItems(sqlPool, pgClient, orderIdMap) {
   const ehiOrderIds = Array.from(orderIdMap.keys());
   if (ehiOrderIds.length === 0) return new Map();
 
-  // Batch in groups to avoid SQL query length limits
-  const BATCH = 200;
+  // Fetch all items from SQL Server (batched)
+  const SQL_BATCH = 200;
   let allItems = [];
 
-  for (let i = 0; i < ehiOrderIds.length; i += BATCH) {
-    const batch = ehiOrderIds.slice(i, i + BATCH);
+  for (let i = 0; i < ehiOrderIds.length; i += SQL_BATCH) {
+    const batch = ehiOrderIds.slice(i, i + SQL_BATCH);
     const idList = batch.join(',');
 
     const result = await sqlPool.query(`
@@ -334,50 +354,94 @@ async function syncOrderItems(sqlPool, pgClient, orderIdMap) {
 
   log(`  Found ${allItems.length} order items`);
 
-  let itemCount = 0;
-  const itemIdMap = new Map(); // Key: "OrderId-Item_Finished_Id" → PG id
+  // Build column arrays
+  const orderIds = [];
+  const orderDetailIdSrcs = [];
+  const orderIdSrcs = [];
+  const itemFinishedIds = [];
+  const designNames = [];
+  const sizes = [];
+  const colors = [];
+  const qualities = [];
+  const orderedQtys = [];
+  const articleNos = [];
 
   for (const item of allItems) {
     const pgOrderId = orderIdMap.get(item.OrderId);
     if (!pgOrderId) continue;
 
-    const res = await pgClient.query(`
-      INSERT INTO ehi_order_items (order_id, order_detail_id_src, item_finished_id, design_name, size, color, quality, ordered_qty, article_no, synced_at)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
-      RETURNING id
-    `, [
-      pgOrderId,
-      item.OrderDetailId,
-      item.Item_Finished_Id,
-      item.DesignName || '',
-      item.SizeName || '',
-      item.ColorName || '',
-      item.QualityName || '',
-      item.QtyRequired || 0,
-      item.ArticalNo || '',
-    ]);
-
-    // Key by OrderId + Item_Finished_Id (how CarpetNumber links to OrderDetail)
-    const key = `${item.OrderId}-${item.Item_Finished_Id}`;
-    itemIdMap.set(key, res.rows[0].id);
-    itemCount++;
+    orderIds.push(pgOrderId);
+    orderDetailIdSrcs.push(item.OrderDetailId);
+    orderIdSrcs.push(item.OrderId);
+    itemFinishedIds.push(item.Item_Finished_Id);
+    designNames.push(item.DesignName || '');
+    sizes.push(item.SizeName || '');
+    colors.push(item.ColorName || '');
+    qualities.push(item.QualityName || '');
+    orderedQtys.push(item.QtyRequired || 0);
+    articleNos.push(item.ArticalNo || '');
   }
 
-  log(`  Synced ${itemCount} order items`);
+  await bulkInsert(pgClient, 'ehi_order_items',
+    ['order_id', 'order_detail_id_src', 'order_id_src', 'item_finished_id', 'design_name', 'size', 'color', 'quality', 'ordered_qty', 'article_no'],
+    ['int[]', 'int[]', 'int[]', 'int[]', 'text[]', 'text[]', 'text[]', 'text[]', 'int[]', 'text[]'],
+    [orderIds, orderDetailIdSrcs, orderIdSrcs, itemFinishedIds, designNames, sizes, colors, qualities, orderedQtys, articleNos],
+    5000
+  );
+
+  // Build itemIdMap: "ehiOrderId-itemFinishedId" → PG id
+  const mapResult = await pgClient.query('SELECT id, order_id_src, item_finished_id FROM ehi_order_items');
+  const itemIdMap = new Map();
+  for (const row of mapResult.rows) {
+    const key = `${row.order_id_src}-${row.item_finished_id}`;
+    itemIdMap.set(key, row.id);
+  }
+
+  log(`  Synced ${itemIdMap.size} order items`);
   return itemIdMap;
 }
 
 async function syncCarpets(sqlPool, pgClient, orderIdMap, itemIdMap) {
-  log('Syncing carpets (this may take a while for 300K+ records)...');
+  log('Syncing carpets (bulk mode)...');
 
   const ehiOrderIds = Array.from(orderIdMap.keys());
   if (ehiOrderIds.length === 0) return 0;
 
   let carpetCount = 0;
-  const PG_BATCH = 100;
   const SQL_BATCH = 200;
+  const PG_BATCH = 10000;
 
-  // Process SQL Server orders in batches to avoid query timeouts
+  // Accumulate carpets across SQL batches, flush to PG in PG_BATCH chunks
+  let stockNos = [];
+  let tStockNos = [];
+  let orderItemIds = [];
+  let currentProcesses = [];
+  let processNames = [];
+  let wipStages = [];
+  let isPackedArr = [];
+
+  async function flushCarpets() {
+    if (stockNos.length === 0) return;
+
+    await bulkInsert(pgClient, 'ehi_carpets',
+      ['stock_no', 't_stock_no', 'order_item_id', 'current_process', 'current_process_name', 'wip_stage', 'is_packed'],
+      ['int[]', 'text[]', 'int[]', 'int[]', 'text[]', 'text[]', 'boolean[]'],
+      [stockNos, tStockNos, orderItemIds, currentProcesses, processNames, wipStages, isPackedArr],
+      PG_BATCH
+    );
+
+    carpetCount += stockNos.length;
+
+    // Reset buffers
+    stockNos = [];
+    tStockNos = [];
+    orderItemIds = [];
+    currentProcesses = [];
+    processNames = [];
+    wipStages = [];
+    isPackedArr = [];
+  }
+
   for (let i = 0; i < ehiOrderIds.length; i += SQL_BATCH) {
     const orderBatch = ehiOrderIds.slice(i, i + SQL_BATCH);
     const idList = orderBatch.join(',');
@@ -396,44 +460,29 @@ async function syncCarpets(sqlPool, pgClient, orderIdMap, itemIdMap) {
       WHERE cn.OrderId IN (${idList})
     `);
 
-    // Batch insert into PostgreSQL
-    for (let j = 0; j < result.recordset.length; j += PG_BATCH) {
-      const batch = result.recordset.slice(j, j + PG_BATCH);
+    for (const carpet of result.recordset) {
+      const key = `${carpet.OrderId}-${carpet.Item_Finished_Id}`;
+      const pgItemId = itemIdMap.get(key) || null;
+      const wipStage = getWipStage(carpet.CurrentProStatus);
 
-      const values = [];
-      const params = [];
-      let paramIdx = 1;
-
-      for (const carpet of batch) {
-        const key = `${carpet.OrderId}-${carpet.Item_Finished_Id}`;
-        const pgItemId = itemIdMap.get(key) || null;
-        const wipStage = getWipStage(carpet.CurrentProStatus);
-
-        values.push(`($${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, NOW())`);
-        params.push(
-          carpet.StockNo,
-          carpet.TStockNo || '',
-          pgItemId,
-          carpet.CurrentProStatus || null,
-          carpet.ProcessName || '',
-          wipStage,
-          carpet.IsPacked === 1,
-        );
-      }
-
-      if (values.length > 0) {
-        await pgClient.query(`
-          INSERT INTO ehi_carpets (stock_no, t_stock_no, order_item_id, current_process, current_process_name, wip_stage, is_packed, synced_at)
-          VALUES ${values.join(', ')}
-        `, params);
-
-        carpetCount += values.length;
-      }
+      stockNos.push(carpet.StockNo);
+      tStockNos.push(carpet.TStockNo || '');
+      orderItemIds.push(pgItemId);
+      currentProcesses.push(carpet.CurrentProStatus || null);
+      processNames.push(carpet.ProcessName || '');
+      wipStages.push(wipStage);
+      isPackedArr.push(carpet.IsPacked === 1);
     }
 
-    // Log progress every batch
-    log(`  ... ${carpetCount} carpets synced (orders batch ${Math.min(i + SQL_BATCH, ehiOrderIds.length)}/${ehiOrderIds.length})`);
+    // Flush when buffer is large enough
+    if (stockNos.length >= PG_BATCH) {
+      await flushCarpets();
+      log(`  ... ${carpetCount} carpets synced (orders batch ${Math.min(i + SQL_BATCH, ehiOrderIds.length)}/${ehiOrderIds.length})`);
+    }
   }
+
+  // Flush remaining
+  await flushCarpets();
 
   log(`  Synced ${carpetCount} carpets total`);
   return carpetCount;
@@ -448,10 +497,21 @@ async function syncProcessNames(sqlPool, pgClient) {
 
   await pgClient.query('DELETE FROM ehi_process_names');
 
+  // Small table (37 rows), simple multi-value INSERT
+  const values = [];
+  const params = [];
+  let idx = 1;
+
   for (const proc of result.recordset) {
+    values.push(`($${idx++}, $${idx++}, $${idx++})`);
+    params.push(proc.PROCESS_NAME_ID, proc.PROCESS_NAME, proc.ShortName || '');
+  }
+
+  if (values.length > 0) {
     await pgClient.query(
-      'INSERT INTO ehi_process_names (id, name, short_name) VALUES ($1, $2, $3) ON CONFLICT (id) DO UPDATE SET name = $2, short_name = $3',
-      [proc.PROCESS_NAME_ID, proc.PROCESS_NAME, proc.ShortName || '']
+      `INSERT INTO ehi_process_names (id, name, short_name) VALUES ${values.join(', ')}
+       ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, short_name = EXCLUDED.short_name`,
+      params
     );
   }
 
@@ -473,18 +533,15 @@ async function main() {
   let pgClient = null;
 
   try {
-    // Connect to SQL Server
     log('Connecting to EHI SQL Server...');
     sqlPool = await sql.connect(EHI_SQL_CONFIG);
     log('  Connected to SQL Server');
 
-    // Discovery mode — only queries SQL Server
     if (isDiscover) {
       await runDiscovery(sqlPool);
       return;
     }
 
-    // Connect to Neon PostgreSQL
     if (!EHI_PG_URL) {
       throw new Error('EHI_DATABASE_URL not set! Set it in .env or scripts/.env');
     }
@@ -494,7 +551,6 @@ async function main() {
     await pgClient.connect();
     log('  Connected to Neon PostgreSQL');
 
-    // Init mode — create tables
     if (isInit) {
       log('Creating tables...');
       await pgClient.query(CREATE_TABLES_SQL);
@@ -502,6 +558,13 @@ async function main() {
       log('=== Init Complete — Run without --init for full sync ===');
       return;
     }
+
+    // Add order_id_src column to ehi_order_items if missing (migration from v1)
+    try {
+      await pgClient.query(`
+        ALTER TABLE ehi_order_items ADD COLUMN IF NOT EXISTS order_id_src INT
+      `);
+    } catch {}
 
     // Log sync start
     const syncLogRes = await pgClient.query(`
@@ -514,24 +577,20 @@ async function main() {
     const startTime = Date.now();
 
     try {
-      // Sync process names first (small, reference data)
       await syncProcessNames(sqlPool, pgClient);
 
-      // Use a transaction so if sync fails, old data is preserved
+      // Transaction: if anything fails, old data preserved via ROLLBACK
       await pgClient.query('BEGIN');
 
       try {
-        // Sync orders → items → carpets (cascading)
         const orderIdMap = await syncOrders(sqlPool, pgClient);
         const itemIdMap = await syncOrderItems(sqlPool, pgClient, orderIdMap);
         const carpetCount = await syncCarpets(sqlPool, pgClient, orderIdMap, itemIdMap);
 
-        // Commit the transaction — only now does data become visible
         await pgClient.query('COMMIT');
 
         const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
 
-        // Update sync log
         await pgClient.query(`
           UPDATE ehi_sync_log SET
             finished_at = NOW(),
@@ -548,14 +607,12 @@ async function main() {
         log(`  Carpets: ${carpetCount}`);
 
       } catch (txErr) {
-        // Rollback — old data preserved
         await pgClient.query('ROLLBACK');
         log('Transaction rolled back — old data preserved');
         throw txErr;
       }
 
     } catch (syncErr) {
-      // Update sync log with error
       await pgClient.query(`
         UPDATE ehi_sync_log SET
           finished_at = NOW(),

@@ -7,6 +7,7 @@ import { TNA_STAGES, TNA_STAGE_LABELS, TNA_STAGE_SHORT_LABELS } from '@/types'
 import { formatOpsNo, formatDateShort, cn, isOverdue as checkOverdue, getScheduleStatus } from '@/lib/utils'
 import { useUpdateStage } from '@/hooks/useProductionTracker'
 import { useOrder } from '@/hooks/useOrders'
+import { useProductionStatus } from '@/hooks/useProductionStatus'
 import { TnaGanttTimeline } from './TnaGanttTimeline'
 import {
   Package,
@@ -149,7 +150,7 @@ export function TnaView({ orders, isLoading }: TnaViewProps) {
   )
 }
 
-// Wrapper component that fetches order data and chooses Gantt or vertical view
+// Wrapper component that fetches order data and uses real-time Firebase listener
 function TnaTimelineWrapper({
   orderId,
   opsNo,
@@ -164,6 +165,8 @@ function TnaTimelineWrapper({
   isMobile: boolean
 }) {
   const { data: orderData, isLoading } = useOrder(orderId)
+  // Real-time Firebase listener for live stage data
+  const { data: liveTracker } = useProductionStatus(orderId)
 
   if (isLoading) {
     return (
@@ -178,8 +181,8 @@ function TnaTimelineWrapper({
   const startDate = orderData?.orderConfirmationDate || poDate
   const endDate = orderData?.shipDate || exFactoryDate
 
-  // Get tracker stages data
-  const stages = orderData?.tracker?.stages
+  // Merge live Firebase stage data over API-provided tracker data
+  const stages = liveTracker?.stages || orderData?.tracker?.stages
 
   // Get TNA entries from order
   const tnaEntries = orderData?.tna?.entries

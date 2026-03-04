@@ -170,6 +170,41 @@ export interface OrderWithTracker extends Order {
   tracker?: ProductionTrackerEntry
 }
 
+// ============== Production Stats (from Neon) ==============
+
+export interface ProductionStat {
+  pcs: number
+  bazar: number
+  bal: number
+}
+
+export type ProductionStatsMap = Record<string, ProductionStat>
+
+// ============== Inspection Schedule (shared Firestore collection) ==============
+
+export type InspectionStatus = 'scheduled' | 'completed' | 'rescheduled' | 'cancelled'
+
+export interface InspectionSchedule {
+  id: string
+  opsNo: string
+  orderId: string
+  inspectionDate: string
+  inspectionCompany: CompanyCode
+  status: InspectionStatus
+  buyerCode: string
+  articleName?: string
+  totalPcs: number
+  totalSqm: number
+  merchantCode: string
+  scheduledBy: string
+  scheduledAt: string
+  completedAt?: string
+  rescheduledFrom?: string
+  notes?: string
+  createdAt: string
+  updatedAt: string
+}
+
 // ============== API Response Types ==============
 
 export interface ApiResponse<T> {
