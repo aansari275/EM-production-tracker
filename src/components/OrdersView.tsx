@@ -316,11 +316,17 @@ export function OrdersView({ orders, isLoading, productionStats }: OrdersViewPro
                   <TableCell className="py-2 hidden sm:table-cell">
                     <span className={cn(
                       'inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium',
-                      order.orderType === 'samples'
-                        ? 'bg-blue-100 text-blue-700'
-                        : 'bg-green-100 text-green-700'
+                      order.orderType === 'custom' && 'bg-purple-100 text-purple-700',
+                      order.orderType === 'broadloom' && 'bg-blue-100 text-blue-700',
+                      order.orderType === 'area_rugs' && 'bg-green-100 text-green-700',
+                      order.orderType === 'samples' && 'bg-amber-100 text-amber-700',
+                      !order.orderType && 'bg-gray-100 text-gray-600'
                     )}>
-                      {order.orderType === 'samples' ? 'Sample' : 'Prod'}
+                      {order.orderType === 'area_rugs' ? 'Area Rugs' :
+                       order.orderType === 'custom' ? 'Custom' :
+                       order.orderType === 'broadloom' ? 'Broadloom' :
+                       order.orderType === 'samples' ? 'Samples' :
+                       order.orderType || '-'}
                     </span>
                   </TableCell>
                   <TableCell className="py-2 text-right text-sm">

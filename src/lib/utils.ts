@@ -7,30 +7,48 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 /**
- * Format OPS number for display
- * Internal: OPS-25881 → Display: EM-26-881
+ * Get current Indian fiscal year (April to March)
+ * In Jan-Mar, returns previous calendar year
  */
-export function formatOpsNo(opsNo: string): string {
+export function getCurrentFiscalYear(): string {
+  const now = new Date()
+  const month = now.getMonth() // 0-11 (Jan=0, Apr=3)
+  const year = now.getFullYear()
+  const fiscalYear = month < 3 ? year - 1 : year
+  return String(fiscalYear).slice(-2)
+}
+
+/**
+ * Format OPS number for display
+ * Converts OPS-YYXXX to EM-{fiscalYear}-XXX format
+ * Uses Indian Financial Year (April to March)
+ * e.g., OPS-251086 → EM-25-1086, OPS-25881 → EM-25-881
+ */
+export function formatOpsNo(opsNo: string | undefined | null): string {
   if (!opsNo) return '-'
 
-  // Extract numeric part from OPS number
-  const match = opsNo.match(/OPS-(\d+)/)
-  if (!match) return opsNo
-
-  const numericPart = match[1]
-
-  // Get current year (last 2 digits)
-  const currentYear = new Date().getFullYear().toString().slice(-2)
-
-  // Extract just the sequence number (remove embedded year if present)
-  // Handle both formats: "25881" (year 25 + seq 881) and "881" (just seq)
-  let sequence = numericPart
-  if (numericPart.length > 4) {
-    // Assume first 2 digits are year, rest is sequence
-    sequence = numericPart.slice(2)
+  // Already in EM-YY-XXX format - return as is
+  if (/^EM-\d{2}-/.test(opsNo)) {
+    return opsNo
   }
 
-  return `EM-${currentYear}-${sequence}`
+  const currentYear = getCurrentFiscalYear()
+
+  // Convert OPS-YYXXX to EM-{currentYear}-XXX
+  const match = opsNo.match(/^OPS-(2[0-9])(\d+)$/i)
+  if (match) {
+    const sequence = match[2]
+    return `EM-${currentYear}-${sequence}`
+  }
+
+  // Handle OPS numbers without year prefix (e.g., OPS-1086)
+  const simpleMatch = opsNo.match(/^OPS-(\d+)$/i)
+  if (simpleMatch) {
+    const sequence = simpleMatch[1]
+    return `EM-${currentYear}-${sequence}`
+  }
+
+  return opsNo
 }
 
 /**

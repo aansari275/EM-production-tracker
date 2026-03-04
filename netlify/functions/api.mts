@@ -249,33 +249,55 @@ export default async function handler(req: Request, context: Context): Promise<R
     }
 
     // PRODUCTION STATS: Live Neon ERP data (Bazar/Bal per OPS)
+    // Matches Orders app's /api/production-stats exactly
     if (path === '/production-stats' && method === 'GET') {
       const stats: Record<string, { pcs: number; bazar: number; bal: number }> = {}
 
-      // Query EMPL Neon
       const emplUrl = process.env.EMPL_DATABASE_URL
-      if (emplUrl) {
+      const ehiUrl = process.env.EHI_DATABASE_URL
+
+      // Query EMPL Neon (neondb)
+      const fetchEmpl = async () => {
+        if (!emplUrl) return
         try {
           const sql = neon(emplUrl)
-          const rows = await sql`
-            SELECT
-              o.order_number as ops_no,
-              COALESCE(SUM(oi.quantity), 0)::int as pcs,
-              COALESCE(SUM(CASE WHEN oi.status IN ('bazar_done', 'finishing', 'fg_godown', 'packed', 'dispatched') THEN oi.quantity ELSE 0 END), 0)::int as bazar,
-              COALESCE(SUM(CASE WHEN oi.status NOT IN ('bazar_done', 'finishing', 'fg_godown', 'packed', 'dispatched') THEN oi.quantity ELSE 0 END), 0)::int as bal
+
+          // Total pcs per OPS
+          const pcsRows = await sql`
+            SELECT o.order_number as ops_no,
+              SUM(oi.ordered_qty)::int as total_pcs
             FROM orders o
-            JOIN order_items oi ON o.id = oi.order_id
-            WHERE o.status IN ('active', 'open', 'Active', 'Open')
+            JOIN order_items oi ON oi.order_id = o.id
+            WHERE o.status IN ('active','open','Active','Open','confirmed')
               AND (o.order_number LIKE 'EM-25-%' OR o.order_number LIKE 'EM-26-%')
             GROUP BY o.order_number
           `
-          for (const row of rows) {
+
+          // Bazar (WIP) counts per OPS
+          const bazarRows = await sql`
+            SELECT o.order_number as ops_no,
+              COUNT(CASE WHEN c.current_stage NOT IN ('weaving','dispatched','invoiced')
+                    AND c.current_stage IS NOT NULL THEN 1 END)::int as bazar_pcs,
+              COUNT(CASE WHEN c.current_stage = 'dispatched' THEN 1 END)::int as dispatched_pcs
+            FROM orders o
+            JOIN order_items oi ON oi.order_id = o.id
+            LEFT JOIN carpets c ON c.order_item_id = oi.id
+            WHERE o.status IN ('active','open','Active','Open','confirmed')
+              AND (o.order_number LIKE 'EM-25-%' OR o.order_number LIKE 'EM-26-%')
+            GROUP BY o.order_number
+          `
+
+          for (const row of pcsRows) {
             if (row.ops_no) {
-              stats[row.ops_no] = {
-                pcs: Number(row.pcs) || 0,
-                bazar: Number(row.bazar) || 0,
-                bal: Number(row.bal) || 0,
-              }
+              stats[row.ops_no] = { pcs: Number(row.total_pcs) || 0, bazar: 0, bal: 0 }
+            }
+          }
+          for (const row of bazarRows) {
+            if (row.ops_no && stats[row.ops_no]) {
+              stats[row.ops_no].bazar = Number(row.bazar_pcs) || 0
+              const dispatched = Number(row.dispatched_pcs) || 0
+              stats[row.ops_no].bal = stats[row.ops_no].pcs - stats[row.ops_no].bazar - dispatched
+              if (stats[row.ops_no].bal < 0) stats[row.ops_no].bal = 0
             }
           }
         } catch (err) {
@@ -283,38 +305,62 @@ export default async function handler(req: Request, context: Context): Promise<R
         }
       }
 
-      // Query EHI Neon
-      const ehiUrl = process.env.EHI_DATABASE_URL
-      if (ehiUrl) {
+      // Query EHI Neon (ehi_wip)
+      const fetchEhi = async () => {
+        if (!ehiUrl) return
         try {
           const sql = neon(ehiUrl)
-          const rows = await sql`
-            SELECT
-              o.customer_order_no as ops_no,
-              COALESCE(SUM(od.qty_required), 0)::int as pcs,
-              COALESCE(COUNT(CASE WHEN c.current_pro_status > 1 THEN 1 END), 0)::int as bazar,
-              COALESCE(SUM(od.qty_required), 0)::int - COALESCE(COUNT(CASE WHEN c.current_pro_status > 1 THEN 1 END), 0)::int as bal
-            FROM order_master o
-            JOIN order_detail od ON o.order_id = od.order_id
-            LEFT JOIN carpet_number c ON c.item_finished_id = od.item_finished_id AND c.order_id = o.order_id
+
+          // Total pcs per OPS
+          const pcsRows = await sql`
+            SELECT o.order_no as ops_no,
+              SUM(oi.ordered_qty)::int as total_pcs
+            FROM ehi_orders o
+            JOIN ehi_order_items oi ON oi.order_id = o.id
             WHERE o.status = '0'
-            GROUP BY o.customer_order_no
+              AND o.order_no LIKE 'EM-%'
+              AND o.order_no >= 'EM-25-'
+            GROUP BY o.order_no
           `
-          for (const row of rows) {
+
+          // Bazar counts per OPS
+          const bazarRows = await sql`
+            SELECT o.order_no as ops_no,
+              COUNT(CASE WHEN cn.currentprostatus IS NOT NULL
+                    AND cn.currentprostatus != 1 THEN 1 END)::int as bazar_pcs
+            FROM ehi_orders o
+            JOIN ehi_order_items oi ON oi.order_id = o.id
+            LEFT JOIN carpet_number cn ON cn.orderid = oi.order_id_src
+              AND cn.item_finished_id = oi.item_finished_id
+            WHERE o.status = '0'
+              AND o.order_no LIKE 'EM-%'
+              AND o.order_no >= 'EM-25-'
+            GROUP BY o.order_no
+          `
+
+          for (const row of pcsRows) {
             if (row.ops_no) {
-              // Format EHI OPS to match display format
-              const opsKey = row.ops_no
-              stats[opsKey] = {
-                pcs: Number(row.pcs) || 0,
-                bazar: Number(row.bazar) || 0,
-                bal: Math.max(0, Number(row.bal) || 0),
+              if (!stats[row.ops_no]) {
+                stats[row.ops_no] = { pcs: Number(row.total_pcs) || 0, bazar: 0, bal: 0 }
+              } else {
+                stats[row.ops_no].pcs += (Number(row.total_pcs) || 0)
               }
+            }
+          }
+          for (const row of bazarRows) {
+            if (row.ops_no && stats[row.ops_no]) {
+              stats[row.ops_no].bazar += (Number(row.bazar_pcs) || 0)
+              stats[row.ops_no].bal = stats[row.ops_no].pcs - stats[row.ops_no].bazar
+              if (stats[row.ops_no].bal < 0) stats[row.ops_no].bal = 0
             }
           }
         } catch (err) {
           console.error('EHI production stats error:', err)
         }
       }
+
+      // Run both in parallel
+      await Promise.all([fetchEmpl(), fetchEhi()])
 
       return jsonResponse(stats)
     }
@@ -324,23 +370,23 @@ export default async function handler(req: Request, context: Context): Promise<R
       const startDate = url.searchParams.get('startDate')
       const endDate = url.searchParams.get('endDate')
 
-      let query: FirebaseFirestore.Query = db.collection('inspection_schedules')
-
-      if (startDate) {
-        query = query.where('inspectionDate', '>=', startDate)
-      }
-      if (endDate) {
-        query = query.where('inspectionDate', '<=', endDate)
-      }
-
-      const snapshot = await query.get()
-      const schedules = snapshot.docs.map(doc => ({
+      // Fetch all inspection_schedules, filter client-side to avoid composite index requirement
+      const snapshot = await db.collection('inspection_schedules').get()
+      let schedules = snapshot.docs.map(doc => ({
         id: doc.id,
         ...doc.data(),
-      }))
+      })) as any[]
+
+      // Filter by date range if provided
+      if (startDate) {
+        schedules = schedules.filter(s => s.inspectionDate >= startDate)
+      }
+      if (endDate) {
+        schedules = schedules.filter(s => s.inspectionDate <= endDate)
+      }
 
       // Sort by date
-      schedules.sort((a: any, b: any) =>
+      schedules.sort((a, b) =>
         (a.inspectionDate || '').localeCompare(b.inspectionDate || '')
       )
 
