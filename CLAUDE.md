@@ -287,7 +287,20 @@ netlify/functions/
 └── wip.mts                    # Live WIP from EMPL + EHI databases (30s timeout)
 ```
 
-## Recent Changes (Feb 2026)
+## Recent Changes (Mar 2026)
+
+### Mar 4, 2026 - TNA ERP Integration (Live Production Stage Data)
+- TNA tab now auto-derives stage progress from live ERP data instead of requiring manual Firestore updates
+- New `GET /api/tna-erp-stages` endpoint queries EMPL + EHI Neon databases in parallel
+- Data returned: RM purchase (indent/GRN), dyeing (indent with DyingType), weaving, finishing, FG godown, packing, dispatch piece counts + actual completion dates
+- ERP-derived stages merge with Firestore manual overrides (manual takes priority)
+- Actual dates from ERP: RM received (material_ledger PR / purchase_receive_master), dyeing (material_ledger DI/DR / indent_master), weaving/finishing (carpets.bazar_date), dispatch (carpets.dispatch_date)
+- Bad date guard: rejects dates with year outside 2020-2035
+- Piece count labels on Gantt timeline bars (e.g., "23/50")
+- Uses `EMPL_DATABASE_URL` and `EHI_DATABASE_URL` env vars (already configured in Netlify)
+- **New files**: `src/hooks/useErpTnaStages.ts` (React Query hook, 5-min stale time)
+- **Modified**: `netlify/functions/api.mts`, `src/lib/utils.ts` (`deriveErpStageStatuses`, `erpPcsLabel`, `getStageDisplayStatus`), `src/components/TnaView.tsx` (ERP merge), `src/components/TnaGanttTimeline.tsx` (piece count labels)
+- Synced with Orders app (`em-orders`) which has the same endpoint and logic
 
 ### Mar 4, 2026 - TED Tab
 - New **TED** tab (4th tab) in Production Tracker dashboard
