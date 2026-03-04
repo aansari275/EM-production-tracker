@@ -13,7 +13,7 @@ function toLocalDateString(date: Date): string {
   return `${yyyy}-${mm}-${dd}`
 }
 
-// Helper: Get 15-day date range starting from today
+// Helper: Get 15-day date range (today + 14 days)
 export function get15DayRange(): { startDate: string; endDate: string } {
   const today = new Date()
   const endDate = new Date(today)
@@ -22,6 +22,20 @@ export function get15DayRange(): { startDate: string; endDate: string } {
   return {
     startDate: toLocalDateString(today),
     endDate: toLocalDateString(endDate),
+  }
+}
+
+// Helper: Get broader range to include recent past inspections
+export function getExtendedRange(): { startDate: string; endDate: string } {
+  const today = new Date()
+  const start = new Date(today)
+  start.setDate(start.getDate() - 7) // 7 days back
+  const end = new Date(today)
+  end.setDate(end.getDate() + 14) // 14 days forward
+
+  return {
+    startDate: toLocalDateString(start),
+    endDate: toLocalDateString(end),
   }
 }
 
@@ -94,4 +108,9 @@ export function useInspectionSchedules(startDate: string, endDate: string) {
     },
     staleTime: 1000 * 60 * 2, // 2 minutes
   })
+}
+
+// Today's date string for comparisons
+export function getTodayString(): string {
+  return toLocalDateString(new Date())
 }
