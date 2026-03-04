@@ -409,7 +409,10 @@ export default async function handler(req: Request, context: Context): Promise<R
         const productQuality = d.productQuality || d.product_quality || ''
         const productType = d.productType || d.product_type || ''
         const size = d.size || ''
-        const ppMeetingDate = d.ppMeetingDate || d.pp_meeting_date || ''
+        const rawDate = d.ppMeetingDate || d.pp_meeting_date || ''
+        const ppMeetingDate = rawDate?._seconds
+          ? new Date(rawDate._seconds * 1000).toISOString().split('T')[0]
+          : typeof rawDate === 'string' ? rawDate : ''
         const pileMaterial = d.pileMaterial || d.pile_material || ''
         const status = d.status || ''
 
