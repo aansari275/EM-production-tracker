@@ -285,6 +285,7 @@ export function OrdersView({ orders, isLoading, productionStats }: OrdersViewPro
 
             // Production stats lookup
             const stats = productionStats?.[formatOpsNo(order.salesNo)]
+            const bazarQty = stats ? stats.bazar : null
             const bazarPct = stats && stats.pcs > 0 ? Math.round((stats.bazar / stats.pcs) * 100) : null
             const bal = stats ? stats.bal : null
 
@@ -333,14 +334,14 @@ export function OrdersView({ orders, isLoading, productionStats }: OrdersViewPro
                     {totalPcs.toLocaleString()}
                   </TableCell>
                   <TableCell className="py-2 text-right hidden md:table-cell">
-                    {bazarPct !== null ? (
+                    {bazarQty !== null ? (
                       <span className={cn(
                         'inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-medium',
-                        bazarPct >= 90 ? 'bg-green-100 text-green-700' :
-                        bazarPct >= 50 ? 'bg-amber-100 text-amber-700' :
+                        bazarPct !== null && bazarPct >= 90 ? 'bg-green-100 text-green-700' :
+                        bazarPct !== null && bazarPct >= 50 ? 'bg-amber-100 text-amber-700' :
                         'bg-red-100 text-red-700'
                       )}>
-                        {bazarPct}%
+                        {bazarQty.toLocaleString()}
                       </span>
                     ) : (
                       <span className="text-xs text-gray-400">-</span>
