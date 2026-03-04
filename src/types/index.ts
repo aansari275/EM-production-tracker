@@ -205,6 +205,49 @@ export interface InspectionSchedule {
   updatedAt: string
 }
 
+// ============== TED (Technical Execution Documents) Types ==============
+
+export interface TedFormSummary {
+  id: string
+  emDesignNo: string
+  buyerCode: string
+  buyerName: string
+  buyerDesignName?: string
+  construction?: string
+  productQuality?: string
+  productType?: string
+  size?: string
+  ppMeetingDate?: string
+  pileMaterial?: string
+  status?: string
+  thumbnailUrl?: string
+}
+
+export interface TedForm extends TedFormSummary {
+  meetingAttendees?: string[]
+  unfinishedGsm?: number
+  finishedGsm?: number
+  warpMaterial?: string
+  weftMaterial?: string
+  pileHeightUnfinished?: string
+  pileHeightFinished?: string
+  fringesDetails?: string
+  sizeTolerance?: string
+  processFlow?: string
+  qualityCallOutsCtq?: string
+  buyersSpecificRequirements?: string
+  remarks?: string
+  reedNoKanghi?: string
+  warpIn6Inches?: string
+  weftIn6Inches?: string
+  shadeCardAvailable?: string
+  redSealAvailable?: string
+  khatiDetails?: string
+  imageUrls?: Record<string, string[]>
+  createdAt?: string
+  updatedAt?: string
+}
+
 // ============== API Response Types ==============
 
 export interface ApiResponse<T> {

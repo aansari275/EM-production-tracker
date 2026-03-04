@@ -16,6 +16,7 @@ import {
 import { OrdersView } from '@/components/OrdersView'
 import { TnaView } from '@/components/TnaView'
 import { InspectionCalendarView } from '@/components/InspectionCalendarView'
+import { TedListView } from '@/components/TedListView'
 import { useProductionStats } from '@/hooks/useProductionStats'
 import {
   Factory,
@@ -25,6 +26,7 @@ import {
   Table,
   Calendar,
   CalendarCheck,
+  FileText,
   Filter,
   X,
   Building2,
@@ -415,6 +417,10 @@ export function DashboardPage() {
               <Calendar className="h-4 w-4" />
               TNA Timeline
             </TabsTrigger>
+            <TabsTrigger value="ted" className="gap-2 data-[state=active]:bg-green-50 data-[state=active]:text-green-700">
+              <FileText className="h-4 w-4" />
+              TED
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="orders" className="mt-3">
@@ -431,6 +437,10 @@ export function DashboardPage() {
             <div className="bg-white rounded-lg border p-4">
               <TnaView orders={filteredOrders} isLoading={isLoading} />
             </div>
+          </TabsContent>
+
+          <TabsContent value="ted" className="mt-3">
+            <TedListView />
           </TabsContent>
         </Tabs>
       </main>

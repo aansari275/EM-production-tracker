@@ -393,6 +393,127 @@ export default async function handler(req: Request, context: Context): Promise<R
       return jsonResponse({ schedules })
     }
 
+    // TEDS: List/search all TEDs
+    if (path === '/teds' && method === 'GET') {
+      const search = url.searchParams.get('search')?.toLowerCase()
+
+      const snapshot = await db.collection('tedForms').get()
+      let teds = snapshot.docs.map((doc) => {
+        const d = doc.data()
+        // Normalize snake_case / camelCase field names
+        const emDesignNo = d.emDesignNo || d.empl_design_no || ''
+        const buyerCode = d.buyerCode || d.buyer_code || ''
+        const buyerName = d.buyerName || d.buyer_name || ''
+        const buyerDesignName = d.buyerDesignName || d.buyer_design_name || ''
+        const construction = d.construction || ''
+        const productQuality = d.productQuality || d.product_quality || ''
+        const productType = d.productType || d.product_type || ''
+        const size = d.size || ''
+        const ppMeetingDate = d.ppMeetingDate || d.pp_meeting_date || ''
+        const pileMaterial = d.pileMaterial || d.pile_material || ''
+        const status = d.status || ''
+
+        // Get first image URL for thumbnail
+        const images = d.images || d.imageUrls || {}
+        let thumbnailUrl = ''
+        for (const key of ['product_photo', 'productPhoto', 'approved_cad', 'approvedCad']) {
+          if (images[key] && Array.isArray(images[key]) && images[key].length > 0) {
+            thumbnailUrl = images[key][0]
+            break
+          }
+        }
+
+        return {
+          id: doc.id,
+          emDesignNo,
+          buyerCode,
+          buyerName,
+          buyerDesignName,
+          construction,
+          productQuality,
+          productType,
+          size,
+          ppMeetingDate,
+          pileMaterial,
+          status,
+          thumbnailUrl,
+        }
+      })
+
+      // Apply search filter
+      if (search) {
+        teds = teds.filter((t) => {
+          return (
+            t.emDesignNo.toLowerCase().includes(search) ||
+            t.buyerCode.toLowerCase().includes(search) ||
+            t.buyerName.toLowerCase().includes(search) ||
+            t.buyerDesignName.toLowerCase().includes(search) ||
+            t.construction.toLowerCase().includes(search) ||
+            t.productQuality.toLowerCase().includes(search)
+          )
+        })
+      }
+
+      // Sort by ppMeetingDate desc (newest first)
+      teds.sort((a, b) => (b.ppMeetingDate || '').localeCompare(a.ppMeetingDate || ''))
+
+      return jsonResponse({ success: true, data: teds })
+    }
+
+    // TEDS: Get single TED full details
+    if (path.match(/^\/teds\/[^/]+$/) && method === 'GET') {
+      const tedId = path.split('/')[2]
+      const doc = await db.collection('tedForms').doc(tedId).get()
+
+      if (!doc.exists) {
+        return jsonResponse({ success: false, error: 'TED not found' }, 404)
+      }
+
+      const d = doc.data()!
+      const ted = {
+        id: doc.id,
+        emDesignNo: d.emDesignNo || d.empl_design_no || '',
+        buyerCode: d.buyerCode || d.buyer_code || '',
+        buyerName: d.buyerName || d.buyer_name || '',
+        buyerDesignName: d.buyerDesignName || d.buyer_design_name || '',
+        construction: d.construction || '',
+        productQuality: d.productQuality || d.product_quality || '',
+        productType: d.productType || d.product_type || '',
+        size: d.size || '',
+        ppMeetingDate: d.ppMeetingDate || d.pp_meeting_date || '',
+        pileMaterial: d.pileMaterial || d.pile_material || '',
+        status: d.status || '',
+        meetingAttendees: d.meetingAttendees || d.meeting_attendees || [],
+        unfinishedGsm: d.unfinishedGsm || d.unfinished_gsm || null,
+        finishedGsm: d.finishedGsm || d.finished_gsm || null,
+        warpMaterial: d.warpMaterial || d.warp_material || '',
+        weftMaterial: d.weftMaterial || d.weft_material || '',
+        pileHeightUnfinished: d.pileHeightUnfinished || d.pile_height_unfinished || '',
+        pileHeightFinished: d.pileHeightFinished || d.pile_height_finished || '',
+        fringesDetails: d.fringesDetails || d.fringes_details || '',
+        sizeTolerance: d.sizeTolerance || d.size_tolerance || '',
+        processFlow: d.processFlow || d.process_flow || '',
+        qualityCallOutsCtq: d.qualityCallOutsCtq || d.quality_call_outs || '',
+        buyersSpecificRequirements: d.buyersSpecificRequirements || d.buyers_specific_requirements || '',
+        remarks: d.remarks || '',
+        reedNoKanghi: d.reedNoKanghi || d.reed_no_kanghi || '',
+        warpIn6Inches: d.warpIn6Inches || d.warp_in_6_inches || '',
+        weftIn6Inches: d.weftIn6Inches || d.weft_in_6_inches || '',
+        shadeCardAvailable: d.shadeCardAvailable || d.shade_card_available || '',
+        redSealAvailable: d.redSealAvailable || d.red_seal_available || '',
+        khatiDetails: d.khatiDetails || d.khati_details || '',
+        imageUrls: d.images || d.imageUrls || {},
+        createdAt: d.createdAt?._seconds
+          ? new Date(d.createdAt._seconds * 1000).toISOString()
+          : d.createdAt || null,
+        updatedAt: d.updatedAt?._seconds
+          ? new Date(d.updatedAt._seconds * 1000).toISOString()
+          : d.updatedAt || null,
+      }
+
+      return jsonResponse({ success: true, data: ted })
+    }
+
     // Not found
     return jsonResponse({ success: false, error: 'Not found' }, 404)
 
