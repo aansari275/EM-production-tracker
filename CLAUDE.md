@@ -82,7 +82,18 @@ Excel-style production tracker for the Production Planning & Control (PPC) team.
 - 4 key metrics: Orders, Total Pcs, Overdue, This Week
 - Clean horizontal layout below upload zone
 
-### 7. New Orders Detection
+### 7. TED Tab (Technical Execution Documents)
+- Searchable grid of all TEDs from `tedForms` Firestore collection (296 docs)
+- **Search**: EM Design No, Buyer Code, Buyer Name, Construction, Quality (300ms debounce)
+- Card grid: 1 col mobile, 2 cols sm, 3 cols lg
+- Each card: EM Design (mono), Buyer, Construction/Quality badges, PP Meeting Date, thumbnail
+- Click to expand inline with 5 detail sections: Header, Construction, Materials, Quality & Process, Images
+- API normalizes both snake_case (`buyer_code`) and camelCase (`buyerCode`) field names
+- Firestore Timestamps converted to ISO strings
+- Images: clickable thumbnails linking to full-size (product photos, shade card, master hank, red seal, approved CAD)
+- **Files**: `src/components/TedListView.tsx`, `src/hooks/useTeds.ts`
+
+### 8. New Orders Detection
 - **Compares by OPS#** - Shows orders whose OPS# is NOT in uploaded Excel
 - Pulsing amber badge on upload zone: "X new orders - Click to view"
 - **Clickable modal** with full details:
@@ -160,6 +171,8 @@ interface ProductionTrackerEntry {
 | `/api/production-status/file` | POST | Save upload metadata + OPS numbers from Excel |
 | `/api/production-status/new-orders` | GET | Get orders whose OPS# is NOT in uploaded Excel |
 | `/api/wip` | GET | Live WIP from EMPL + EHI (filters: `company`, `buyer`, `search`) |
+| `/api/teds` | GET | List/search all TEDs (`?search=` across design, buyer, construction) |
+| `/api/teds/:id` | GET | Get single TED full details |
 
 ## Live WIP Dashboard (Feb 2026)
 
@@ -248,12 +261,14 @@ src/
 ├── components/
 │   ├── ProductionTable.tsx    # Main Excel-style table
 │   ├── TnaView.tsx            # TNA timeline view
+│   ├── TedListView.tsx        # TED searchable grid + detail expansion
 │   ├── StatsCards.tsx         # Dashboard stats
 │   ├── ExcelUpload.tsx        # Bulk upload dialog
 │   └── ui/                    # shadcn/ui components
 ├── hooks/
 │   ├── useOrders.ts           # Fetch orders & production rows
 │   ├── useWIP.ts              # Live WIP React Query hook
+│   ├── useTeds.ts             # TED list + detail React Query hooks
 │   └── useProductionTracker.ts # Update mutations
 ├── pages/
 │   ├── LoginPage.tsx
@@ -273,6 +288,14 @@ netlify/functions/
 ```
 
 ## Recent Changes (Feb 2026)
+
+### Mar 4, 2026 - TED Tab
+- New **TED** tab (4th tab) in Production Tracker dashboard
+- Reads from `tedForms` Firestore collection (296 documents)
+- API endpoints: `GET /api/teds` (list/search) and `GET /api/teds/:id` (full detail)
+- Normalizes snake_case and camelCase field names from Firestore
+- Searchable card grid with inline detail expansion (5 sections + images)
+- Files: `TedListView.tsx`, `useTeds.ts`, types in `index.ts`, endpoints in `api.mts`
 
 ### Feb 8, 2026 - WIP: Fix EMPL OPS mapping + Grouped view + Open/All filter
 - **EMPL OPS Fix** - EMPL was showing buyer PO refs (`ORF24-1414`) instead of EM OPS numbers (`EM-25-1132`). Root cause: query used `COALESCE(o.ops_number, o.order_number)` but `ops_number` = buyer PO, `order_number` = EM OPS. Fixed to use `o.order_number as ops_no` directly.
