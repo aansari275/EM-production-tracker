@@ -517,6 +517,254 @@ export default async function handler(req: Request, context: Context): Promise<R
       return jsonResponse({ success: true, data: ted })
     }
 
+    // ============================================================
+    // TNA ERP Stages — Live production stage data from Neon
+    // GET /api/tna-erp-stages
+    // Returns per-OPS stage data for WIP, RM Purchase, and Dyeing
+    // ============================================================
+    if (path === '/tna-erp-stages' && method === 'GET') {
+      try {
+        const emplUrl = process.env.EMPL_DATABASE_URL
+        const ehiUrl = process.env.EHI_DATABASE_URL
+
+        if (!emplUrl && !ehiUrl) {
+          return jsonResponse({ error: 'Neon connection strings not configured' }, 500)
+        }
+
+        interface ErpStageData {
+          totalOrdered: number
+          totalCarpets: number
+          onLoom: number
+          finishing: number
+          fgGodown: number
+          packed: number
+          dispatched: number
+          hasIndent: boolean
+          indentReceived: boolean
+          hasDyeingOrder: boolean
+          dyeingReceived: boolean
+          source: 'EMPL' | 'EHI'
+          rmReceivedDate?: string | null
+          dyeingIssuedDate?: string | null
+          dyeingReceivedDate?: string | null
+          firstBazarDate?: string | null
+          lastBazarDate?: string | null
+          firstDispatchDate?: string | null
+          lastDispatchDate?: string | null
+        }
+
+        const stages: Record<string, ErpStageData> = {}
+
+        // Query EMPL Neon
+        const fetchEmpl = async () => {
+          if (!emplUrl) return
+          try {
+            const sql = neon(emplUrl)
+
+            // WIP counts + carpet dates
+            const wipRows = await sql`
+              SELECT o.order_number as ops_no,
+                SUM(oi.ordered_qty)::int as total_ordered,
+                COUNT(c.id)::int as total_carpets,
+                COUNT(CASE WHEN c.current_stage = 'weaving' THEN 1 END)::int as on_loom,
+                COUNT(CASE WHEN c.current_stage NOT IN ('weaving','dispatched','invoiced')
+                      AND c.current_stage IS NOT NULL THEN 1 END)::int as bazar,
+                COUNT(CASE WHEN c.current_stage = 'dispatched' THEN 1 END)::int as dispatched,
+                MIN(c.bazar_date) as first_bazar_date,
+                MAX(c.bazar_date) as last_bazar_date,
+                MIN(c.dispatch_date) as first_dispatch_date,
+                MAX(c.dispatch_date) as last_dispatch_date
+              FROM orders o
+              JOIN order_items oi ON oi.order_id = o.id
+              LEFT JOIN carpets c ON c.order_item_id = oi.id
+              WHERE o.status IN ('active','open','Active','Open','confirmed')
+                AND (o.order_number LIKE 'EM-25-%' OR o.order_number LIKE 'EM-26-%')
+              GROUP BY o.order_number
+            `
+
+            // RM Purchase
+            const rmRows = await sql`
+              SELECT o.order_number as ops_no,
+                BOOL_OR(pi.id IS NOT NULL) as has_indent,
+                BOOL_OR(pi.status IN ('received', 'billed')) as indent_received
+              FROM orders o
+              LEFT JOIN purchase_indent_items pii ON pii.order_id = o.id
+              LEFT JOIN purchase_indents pi ON pi.id = pii.indent_id
+              WHERE o.status IN ('active','open','Active','Open','confirmed')
+                AND (o.order_number LIKE 'EM-25-%' OR o.order_number LIKE 'EM-26-%')
+              GROUP BY o.order_number
+            `
+
+            // Dyeing + dates from material_ledger
+            const dyeRows = await sql`
+              SELECT o.order_number as ops_no,
+                BOOL_OR(do2.id IS NOT NULL OR ml_di.id IS NOT NULL) as has_dyeing,
+                BOOL_OR(doi.received_qty > 0 OR ml_dr.id IS NOT NULL) as dyeing_received,
+                MAX(CASE WHEN ml.transaction_type = 'DI' THEN ml.slip_date END) as dyeing_issued_date,
+                MAX(CASE WHEN ml.transaction_type = 'DR' THEN ml.slip_date END) as dyeing_received_date,
+                MAX(CASE WHEN ml.transaction_type = 'PR' THEN ml.slip_date END) as rm_received_date
+              FROM orders o
+              LEFT JOIN dyeing_orders do2 ON do2.order_id = o.id
+              LEFT JOIN dyeing_order_items doi ON doi.dyeing_order_id = do2.id
+              LEFT JOIN material_ledger ml_di ON ml_di.order_id = o.id AND ml_di.transaction_type = 'DI'
+              LEFT JOIN material_ledger ml_dr ON ml_dr.order_id = o.id AND ml_dr.transaction_type = 'DR'
+              LEFT JOIN material_ledger ml ON ml.order_id = o.id AND ml.transaction_type IN ('DI','DR','PR')
+              WHERE o.status IN ('active','open','Active','Open','confirmed')
+                AND (o.order_number LIKE 'EM-25-%' OR o.order_number LIKE 'EM-26-%')
+              GROUP BY o.order_number
+            `
+
+            // Build RM map
+            const rmMap: Record<string, { hasIndent: boolean; indentReceived: boolean }> = {}
+            for (const row of rmRows) {
+              rmMap[row.ops_no] = { hasIndent: row.has_indent || false, indentReceived: row.indent_received || false }
+            }
+
+            // Build dyeing map (with dates)
+            const dyeMap: Record<string, { hasDyeingOrder: boolean; dyeingReceived: boolean; dyeingIssuedDate?: string; dyeingReceivedDate?: string; rmReceivedDate?: string }> = {}
+            for (const row of dyeRows) {
+              dyeMap[row.ops_no] = {
+                hasDyeingOrder: row.has_dyeing || false,
+                dyeingReceived: row.dyeing_received || false,
+                dyeingIssuedDate: row.dyeing_issued_date || null,
+                dyeingReceivedDate: row.dyeing_received_date || null,
+                rmReceivedDate: row.rm_received_date || null,
+              }
+            }
+
+            // Merge WIP + RM + Dyeing
+            for (const row of wipRows) {
+              const rm = rmMap[row.ops_no] || { hasIndent: false, indentReceived: false }
+              const dye = dyeMap[row.ops_no] || { hasDyeingOrder: false, dyeingReceived: false }
+              stages[row.ops_no] = {
+                totalOrdered: row.total_ordered || 0,
+                totalCarpets: row.total_carpets || 0,
+                onLoom: row.on_loom || 0,
+                finishing: row.bazar || 0,  // EMPL: all bazar = finishing
+                fgGodown: 0,  // Not distinguishable in EMPL
+                packed: 0,    // Not distinguishable in EMPL
+                dispatched: row.dispatched || 0,
+                hasIndent: rm.hasIndent,
+                indentReceived: rm.indentReceived,
+                hasDyeingOrder: dye.hasDyeingOrder,
+                dyeingReceived: dye.dyeingReceived,
+                source: 'EMPL',
+                rmReceivedDate: dye.rmReceivedDate || null,
+                dyeingIssuedDate: dye.dyeingIssuedDate || null,
+                dyeingReceivedDate: dye.dyeingReceivedDate || null,
+                firstBazarDate: row.first_bazar_date || null,
+                lastBazarDate: row.last_bazar_date || null,
+                firstDispatchDate: row.first_dispatch_date || null,
+                lastDispatchDate: row.last_dispatch_date || null,
+              }
+            }
+          } catch (err) {
+            console.error('EMPL TNA ERP stages error:', err)
+          }
+        }
+
+        // Query EHI Neon
+        const fetchEhi = async () => {
+          if (!ehiUrl) return
+          try {
+            const sql = neon(ehiUrl)
+
+            // WIP counts using ehi_carpets.wip_stage
+            const wipRows = await sql`
+              SELECT o.order_no as ops_no,
+                SUM(oi.ordered_qty)::int as total_ordered,
+                COUNT(ec.id)::int as total_carpets,
+                COUNT(CASE WHEN ec.wip_stage = 'on_loom' THEN 1 END)::int as on_loom,
+                COUNT(CASE WHEN ec.wip_stage = 'finishing' THEN 1 END)::int as finishing,
+                COUNT(CASE WHEN ec.wip_stage = 'fg_godown' THEN 1 END)::int as fg_godown,
+                COUNT(CASE WHEN ec.wip_stage = 'packed' THEN 1 END)::int as packed
+              FROM ehi_orders o
+              JOIN ehi_order_items oi ON oi.order_id = o.id
+              LEFT JOIN ehi_carpets ec ON ec.order_item_id = oi.id
+              WHERE o.status = '0' AND o.order_no LIKE 'EM-%' AND o.order_no >= 'EM-25-'
+              GROUP BY o.order_no
+            `
+
+            // RM Purchase (from purchase_indent_detail) + GRN dates
+            const rmRows = await sql`
+              SELECT om.customerorderno as ops_no,
+                BOOL_OR(pid.pindentdetailid IS NOT NULL) as has_indent,
+                BOOL_OR(prd.purchasereceivedetailid IS NOT NULL) as indent_received,
+                MAX(prm.receivedate::date)::text as rm_received_date
+              FROM order_master om
+              LEFT JOIN purchase_indent_detail pid ON pid.orderid = om.orderid
+              LEFT JOIN purchase_receive_detail prd ON prd.orderid = om.orderid
+              LEFT JOIN purchase_receive_master prm ON prm.purchasereceiveid = prd.purchasereceiveid
+              WHERE om.status = '0' AND om.customerorderno LIKE 'EM-%' AND om.customerorderno >= 'EM-25-'
+              GROUP BY om.customerorderno
+            `
+
+            // Dyeing (from indent_detail with DyingType > 0) + dates
+            const dyeRows = await sql`
+              SELECT om.customerorderno as ops_no,
+                BOOL_OR(id.dyingtype > 0) as has_dyeing,
+                BOOL_OR(im.receivedate IS NOT NULL AND id.dyingtype > 0) as dyeing_received,
+                MAX(CASE WHEN id.dyingtype > 0 THEN im."date"::date END)::text as dyeing_issued_date,
+                MAX(CASE WHEN id.dyingtype > 0 AND im.receivedate IS NOT NULL THEN im.receivedate::date END)::text as dyeing_received_date
+              FROM order_master om
+              LEFT JOIN indent_detail id ON id.orderid = om.orderid AND id.dyingtype > 0
+              LEFT JOIN indent_master im ON im.indentid = id.indentid
+              WHERE om.status = '0' AND om.customerorderno LIKE 'EM-%' AND om.customerorderno >= 'EM-25-'
+              GROUP BY om.customerorderno
+            `
+
+            // Build maps (with dates)
+            const rmMap: Record<string, { hasIndent: boolean; indentReceived: boolean; rmReceivedDate?: string }> = {}
+            for (const row of rmRows) {
+              rmMap[row.ops_no] = { hasIndent: row.has_indent || false, indentReceived: row.indent_received || false, rmReceivedDate: row.rm_received_date || null }
+            }
+            const dyeMap: Record<string, { hasDyeingOrder: boolean; dyeingReceived: boolean; dyeingIssuedDate?: string; dyeingReceivedDate?: string }> = {}
+            for (const row of dyeRows) {
+              dyeMap[row.ops_no] = { hasDyeingOrder: row.has_dyeing || false, dyeingReceived: row.dyeing_received || false, dyeingIssuedDate: row.dyeing_issued_date || null, dyeingReceivedDate: row.dyeing_received_date || null }
+            }
+
+            // Merge (EHI has no carpet date columns)
+            for (const row of wipRows) {
+              const rm = rmMap[row.ops_no] || { hasIndent: false, indentReceived: false }
+              const dye = dyeMap[row.ops_no] || { hasDyeingOrder: false, dyeingReceived: false }
+              if (!stages[row.ops_no]) {
+                stages[row.ops_no] = {
+                  totalOrdered: row.total_ordered || 0,
+                  totalCarpets: row.total_carpets || 0,
+                  onLoom: row.on_loom || 0,
+                  finishing: row.finishing || 0,
+                  fgGodown: row.fg_godown || 0,
+                  packed: row.packed || 0,
+                  dispatched: 0,
+                  hasIndent: rm.hasIndent,
+                  indentReceived: rm.indentReceived,
+                  hasDyeingOrder: dye.hasDyeingOrder,
+                  dyeingReceived: dye.dyeingReceived,
+                  source: 'EHI',
+                  rmReceivedDate: rm.rmReceivedDate || null,
+                  dyeingIssuedDate: dye.dyeingIssuedDate || null,
+                  dyeingReceivedDate: dye.dyeingReceivedDate || null,
+                }
+              }
+            }
+          } catch (err) {
+            console.error('EHI TNA ERP stages error:', err)
+          }
+        }
+
+        // Run both in parallel
+        await Promise.all([fetchEmpl(), fetchEhi()])
+
+        return jsonResponse(stages)
+      } catch (error: any) {
+        console.error('TNA ERP stages error:', error)
+        return jsonResponse(
+          { error: error.message || 'Failed to fetch TNA ERP stages' },
+          500
+        )
+      }
+    }
+
     // Not found
     return jsonResponse({ success: false, error: 'Not found' }, 404)
 

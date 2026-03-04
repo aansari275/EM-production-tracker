@@ -349,3 +349,155 @@ export function formatGanttDate(dateStr: string | null | undefined): string {
     return ''
   }
 }
+
+// ============== TNA Stage Display Status ==============
+
+/**
+ * Get display status for a single TNA stage.
+ * Matches Production Tracker's getStageStatus() logic.
+ */
+export function getStageDisplayStatus(
+  targetDate: string | null | undefined,
+  actualDate: string | null | undefined,
+  status: 'pending' | 'in_progress' | 'completed',
+  today: string
+): { type: 'ontime' | 'late' | 'in-progress' | 'overdue' | 'not-started'; delta: number } | null {
+  if (!targetDate) return null
+
+  // Guard against bad dates (year typos like 0202 instead of 2026)
+  const year = parseInt(targetDate.substring(0, 4))
+  if (year < 2020 || year > 2035) return null
+
+  // Completed stage: check if on time or late
+  if (actualDate) {
+    const diff = daysBetweenStrings(targetDate, actualDate)
+    return { type: diff <= 0 ? 'ontime' : 'late', delta: diff }
+  }
+
+  // In-progress stage
+  if (status === 'in_progress') {
+    const overdueDays = daysBetweenStrings(targetDate, today)
+    return { type: overdueDays > 0 ? 'overdue' : 'in-progress', delta: overdueDays }
+  }
+
+  // Pending stage
+  if (status === 'pending') {
+    const overdueDays = daysBetweenStrings(targetDate, today)
+    if (overdueDays > 0) return { type: 'overdue', delta: overdueDays }
+    return { type: 'not-started', delta: 0 }
+  }
+
+  return { type: 'not-started', delta: 0 }
+}
+
+/**
+ * Simple days between two date strings (b - a).
+ * Positive means b is after a.
+ */
+function daysBetweenStrings(a: string, b: string): number {
+  return Math.round((new Date(b + 'T00:00:00').getTime() - new Date(a + 'T00:00:00').getTime()) / 86400000)
+}
+
+// ============== ERP Stage Derivation ==============
+
+import type { ErpStageData } from '@/hooks/useErpTnaStages'
+
+/**
+ * Derive TNA stage statuses from live ERP data.
+ * Returns a map of stage key -> StageUpdate (status + label).
+ * Manual Firestore stages take priority over these.
+ */
+export function deriveErpStageStatuses(erp: ErpStageData): Record<string, { status: 'pending' | 'in_progress' | 'completed'; label?: string; actualDate?: string | null }> {
+  const result: Record<string, { status: 'pending' | 'in_progress' | 'completed'; label?: string; actualDate?: string | null }> = {}
+
+  // Raw Material Purchase
+  if (erp.indentReceived) {
+    result.raw_material_purchase = { status: 'completed', label: 'RM Received', actualDate: erp.rmReceivedDate || null }
+  } else if (erp.hasIndent) {
+    result.raw_material_purchase = { status: 'in_progress', label: 'Indent raised' }
+  } else {
+    result.raw_material_purchase = { status: 'pending' }
+  }
+
+  // Dyeing
+  if (erp.dyeingReceived) {
+    result.dyeing = { status: 'completed', label: 'Dyed', actualDate: erp.dyeingReceivedDate || null }
+  } else if (erp.hasDyeingOrder) {
+    result.dyeing = { status: 'in_progress', label: 'Dyeing in progress' }
+  } else {
+    result.dyeing = { status: 'pending' }
+  }
+
+  // Weaving — first bazar date means weaving completed (carpet left loom)
+  if (erp.totalCarpets === 0 && erp.onLoom === 0) {
+    result.weaving = { status: 'pending' }
+  } else if (erp.onLoom > 0) {
+    result.weaving = { status: 'in_progress', label: `${erp.onLoom} on loom` }
+  } else {
+    result.weaving = { status: 'completed', label: `${erp.totalCarpets} pcs`, actualDate: erp.firstBazarDate || null }
+  }
+
+  // Finishing
+  const postWeaving = erp.finishing + erp.fgGodown + erp.packed + erp.dispatched
+  if (postWeaving === 0 && erp.onLoom > 0) {
+    result.finishing = { status: 'pending' }
+  } else if (erp.finishing > 0) {
+    result.finishing = { status: 'in_progress', label: `${erp.finishing} pcs` }
+  } else if (postWeaving > 0) {
+    result.finishing = { status: 'completed', actualDate: erp.lastBazarDate || null }
+  } else {
+    result.finishing = { status: 'pending' }
+  }
+
+  // FG Godown (EHI has granular data, EMPL same as finishing)
+  if (erp.source === 'EHI') {
+    if (erp.fgGodown > 0) {
+      result.fg_godown = { status: 'in_progress', label: `${erp.fgGodown} pcs` }
+    } else if (erp.packed + erp.dispatched > 0) {
+      result.fg_godown = { status: 'completed' }
+    } else {
+      result.fg_godown = { status: 'pending' }
+    }
+  } else {
+    // EMPL: lumped in finishing
+    result.fg_godown = { ...result.finishing }
+  }
+
+  // Packing (EHI granular, EMPL lumped)
+  if (erp.source === 'EHI') {
+    if (erp.packed > 0) {
+      result.packing = { status: 'in_progress', label: `${erp.packed} pcs` }
+    } else if (erp.dispatched > 0) {
+      result.packing = { status: 'completed' }
+    } else {
+      result.packing = { status: 'pending' }
+    }
+  } else {
+    result.packing = { ...result.finishing }
+  }
+
+  // Dispatch
+  if (erp.dispatched === 0) {
+    result.dispatch = { status: 'pending' }
+  } else if (erp.dispatched > 0 && erp.dispatched < erp.totalOrdered) {
+    result.dispatch = { status: 'in_progress', label: `${erp.dispatched}/${erp.totalOrdered}`, actualDate: erp.firstDispatchDate || null }
+  } else {
+    result.dispatch = { status: 'completed', label: `${erp.dispatched} pcs`, actualDate: erp.lastDispatchDate || null }
+  }
+
+  return result
+}
+
+/**
+ * Format piece count label for WIP stages
+ */
+export function erpPcsLabel(erp: ErpStageData, stageKey: string): string | null {
+  switch (stageKey) {
+    case 'weaving': return erp.onLoom > 0 ? `${erp.onLoom}/${erp.totalOrdered}` : null
+    case 'finishing': return erp.finishing > 0 ? `${erp.finishing} pcs` : null
+    case 'fg_godown': return erp.fgGodown > 0 ? `${erp.fgGodown} pcs` : null
+    case 'packing': return erp.packed > 0 ? `${erp.packed} pcs` : null
+    case 'dispatch': return erp.dispatched > 0 ? `${erp.dispatched}/${erp.totalOrdered}` : null
+    default: return null
+  }
+}

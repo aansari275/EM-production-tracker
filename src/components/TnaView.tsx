@@ -4,10 +4,11 @@ import { Badge } from '@/components/ui/badge'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import type { OrderWithTracker, TnaStage, StageStatus } from '@/types'
 import { TNA_STAGES, TNA_STAGE_LABELS, TNA_STAGE_SHORT_LABELS } from '@/types'
-import { formatOpsNo, formatDateShort, cn, isOverdue as checkOverdue, getScheduleStatus } from '@/lib/utils'
+import { formatOpsNo, formatDateShort, cn, isOverdue as checkOverdue, getScheduleStatus, deriveErpStageStatuses, erpPcsLabel } from '@/lib/utils'
 import { useUpdateStage } from '@/hooks/useProductionTracker'
 import { useOrder } from '@/hooks/useOrders'
 import { useProductionStatus } from '@/hooks/useProductionStatus'
+import { useErpTnaStages, type ErpStageData } from '@/hooks/useErpTnaStages'
 import { TnaGanttTimeline } from './TnaGanttTimeline'
 import {
   Package,
@@ -44,6 +45,7 @@ function useIsMobile() {
 export function TnaView({ orders, isLoading }: TnaViewProps) {
   const [expandedOps, setExpandedOps] = useState<Set<string>>(new Set())
   const isMobile = useIsMobile()
+  const { data: erpStagesMap } = useErpTnaStages()
 
   if (isLoading) {
     return (
@@ -139,6 +141,7 @@ export function TnaView({ orders, isLoading }: TnaViewProps) {
                     poDate={order.orderConfirmationDate}
                     exFactoryDate={order.shipDate}
                     isMobile={isMobile}
+                    erpData={erpStagesMap?.[formatOpsNo(order.salesNo)] || undefined}
                   />
                 </CardContent>
               )}
@@ -156,13 +159,15 @@ function TnaTimelineWrapper({
   opsNo,
   poDate,
   exFactoryDate,
-  isMobile
+  isMobile,
+  erpData
 }: {
   orderId: string
   opsNo: string
   poDate: string
   exFactoryDate: string
   isMobile: boolean
+  erpData?: ErpStageData
 }) {
   const { data: orderData, isLoading } = useOrder(orderId)
   // Real-time Firebase listener for live stage data
@@ -182,7 +187,39 @@ function TnaTimelineWrapper({
   const endDate = orderData?.shipDate || exFactoryDate
 
   // Merge live Firebase stage data over API-provided tracker data
-  const stages = liveTracker?.stages || orderData?.tracker?.stages
+  const firestoreStages = liveTracker?.stages || orderData?.tracker?.stages
+
+  // Merge ERP-derived stages with Firestore stages
+  // ERP as base, Firestore manual overrides take priority
+  const todayStr = new Date().toISOString().split('T')[0]
+  let mergedStages = firestoreStages
+
+  if (erpData) {
+    const erpDerived = deriveErpStageStatuses(erpData)
+    const merged: Record<string, { status: StageStatus; actualDate?: string | null; notes?: string; updatedAt?: string }> = {}
+
+    for (const stageKey of TNA_STAGES) {
+      const fsStage = firestoreStages?.[stageKey]
+      const erpStage = erpDerived[stageKey]
+
+      if (fsStage && fsStage.status !== 'pending') {
+        // Firestore manual override takes priority (if not just default pending)
+        merged[stageKey] = fsStage
+      } else if (erpStage) {
+        // Use ERP-derived status with actual date
+        merged[stageKey] = {
+          status: erpStage.status,
+          actualDate: erpStage.actualDate || (erpStage.status === 'completed' ? todayStr : null),
+        }
+      } else if (fsStage) {
+        merged[stageKey] = fsStage
+      } else {
+        merged[stageKey] = { status: 'pending', actualDate: null }
+      }
+    }
+
+    mergedStages = merged as any
+  }
 
   // Get TNA entries from order
   const tnaEntries = orderData?.tna?.entries
@@ -193,8 +230,9 @@ function TnaTimelineWrapper({
       <TnaTimelineVertical
         orderId={orderId}
         opsNo={opsNo}
-        stages={stages}
+        stages={mergedStages}
         tnaEntries={tnaEntries}
+        erpData={erpData}
       />
     )
   }
@@ -207,7 +245,8 @@ function TnaTimelineWrapper({
       startDate={startDate}
       endDate={endDate}
       tnaEntries={tnaEntries}
-      stages={stages}
+      stages={mergedStages}
+      erpData={erpData}
     />
   )
 }
@@ -217,12 +256,14 @@ function TnaTimelineVertical({
   orderId,
   opsNo,
   stages,
-  tnaEntries
+  tnaEntries,
+  erpData
 }: {
   orderId: string
   opsNo: string
   stages?: Record<TnaStage, { status: StageStatus; actualDate?: string | null }>
   tnaEntries?: Array<{ stage: TnaStage; targetDate: string | null }>
+  erpData?: ErpStageData
 }) {
   const updateStage = useUpdateStage()
 
@@ -314,6 +355,11 @@ function TnaTimelineVertical({
                   </div>
 
                   <div className="flex items-center gap-4 text-xs">
+                    {erpData && erpPcsLabel(erpData, data.stage) && (
+                      <div className="text-blue-600 font-medium">
+                        {erpPcsLabel(erpData, data.stage)}
+                      </div>
+                    )}
                     {data.targetDate && (
                       <div className="text-muted-foreground">
                         Target: {formatDateShort(data.targetDate)}

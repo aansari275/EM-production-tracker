@@ -8,11 +8,13 @@ import {
   getScheduleStatus,
   calculateStageDurations,
   formatGanttDate,
-  daysUntil
+  daysUntil,
+  erpPcsLabel
 } from '@/lib/utils'
 import type { TnaStage, TnaEntry, StageUpdate, StageStatus } from '@/types'
 import { TNA_STAGES, TNA_STAGE_LABELS } from '@/types'
 import { useUpdateStage } from '@/hooks/useProductionTracker'
+import type { ErpStageData } from '@/hooks/useErpTnaStages'
 import { CheckCircle2, AlertTriangle, XCircle, Calendar } from 'lucide-react'
 
 interface TnaGanttTimelineProps {
@@ -22,6 +24,7 @@ interface TnaGanttTimelineProps {
   endDate: string             // shipDate (ex-factory)
   tnaEntries?: TnaEntry[]
   stages?: Record<TnaStage, StageUpdate>
+  erpData?: ErpStageData
 }
 
 export function TnaGanttTimeline({
@@ -30,7 +33,8 @@ export function TnaGanttTimeline({
   startDate,
   endDate,
   tnaEntries,
-  stages
+  stages,
+  erpData
 }: TnaGanttTimelineProps) {
   const updateStage = useUpdateStage()
   const today = new Date()
@@ -179,6 +183,8 @@ export function TnaGanttTimeline({
             const isNA = tnaEntry?.targetDate === null
             const overdue = isStageOverdue(tnaEntry?.targetDate, status, today)
 
+            const pcsLabel = erpData ? erpPcsLabel(erpData, stage) : null
+
             return (
               <div
                 key={stage}
@@ -200,6 +206,11 @@ export function TnaGanttTimeline({
                 )}>
                   {TNA_STAGE_LABELS[stage]}
                 </span>
+                {pcsLabel && (
+                  <span className="text-[10px] text-blue-600 font-medium flex-shrink-0">
+                    {pcsLabel}
+                  </span>
+                )}
               </div>
             )
           })}
@@ -237,6 +248,7 @@ export function TnaGanttTimeline({
                 const status: StageStatus = stageData?.status || 'pending'
                 const isNA = tnaEntry?.targetDate === null
                 const overdue = isStageOverdue(tnaEntry?.targetDate, status, today)
+                const pcsLabel = erpData ? erpPcsLabel(erpData, stage) : null
 
                 return (
                   <GanttBar
@@ -247,6 +259,7 @@ export function TnaGanttTimeline({
                     isOverdue={overdue}
                     isNA={isNA}
                     durationDays={duration?.durationDays || 0}
+                    pcsLabel={pcsLabel}
                     onClick={() => handleStatusChange(stage)}
                   />
                 )
@@ -296,6 +309,7 @@ interface GanttBarProps {
   isOverdue: boolean
   isNA: boolean
   durationDays: number
+  pcsLabel?: string | null
   onClick: () => void
 }
 
@@ -306,6 +320,7 @@ function GanttBar({
   isOverdue,
   isNA,
   durationDays,
+  pcsLabel,
   onClick
 }: GanttBarProps) {
   if (isNA) {
@@ -379,7 +394,11 @@ function GanttBar({
             {getIcon()}
           </span>
         )}
-        {widthPercent > 8 && (
+        {pcsLabel && widthPercent > 6 ? (
+          <span className={cn('text-[10px] font-medium', getTextClasses())}>
+            {pcsLabel}
+          </span>
+        ) : widthPercent > 8 && (
           <span className={cn('text-[10px] font-medium', getTextClasses())}>
             {Math.round(durationDays)}d
           </span>
